@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+# 运行时落盘文件（真实存档与真实钥匙，永不入库）
+server/pond_save.json
+server/pond_save.json.*
+server/.tokens.json

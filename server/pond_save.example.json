@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "created_at": 0.0,
+  "players": {
+    "player1": {
+      "engine": {
+        "version": 1,
+        "seed": 1,
+        "rngState": 1,
+        "rngCalls": 0,
+        "turn": 0,
+        "season_id": "spring",
+        "season_length": 20,
+        "season_started_turn": 0,
+        "points": 1000,
+        "location_id": "moonlit_pond",
+        "unlocked_locations": [
+          "moonlit_pond",
+          "reed_river"
+        ],
+        "bait_inventory": {
+          "basic_worm": 5
+        },
+        "catch_inventory": [],
+        "items": {},
+        "pending_chests": [],
+        "seen_letters": {},
+        "encyclopedia": {},
+        "stats": {
+          "total_casts": 0,
+          "total_caught": 0,
+          "total_chests": 0,
+          "total_dives": 0
+        },
+        "local_dry": 0,
+        "fever": 0,
+        "free_bait": 0,
+        "oxygen": 0,
+        "oxygen_ever": false,
+        "dive_unlocked": [],
+        "map_fragments": {}
+      },
+      "joined_at": 0.0,
+      "last_action": 0.0,
+      "last_seen": 0.0,
+      "txn_cache": {},
+      "last_catch": null
+    },
+    "player2": {
+      "engine": {
+        "version": 1,
+        "seed": 2,
+        "rngState": 2,
+        "rngCalls": 0,
+        "turn": 0,
+        "season_id": "spring",
+        "season_length": 20,
+        "season_started_turn": 0,
+        "points": 1000,
+        "location_id": "moonlit_pond",
+        "unlocked_locations": [
+          "moonlit_pond",
+          "reed_river"
+        ],
+        "bait_inventory": {
+          "basic_worm": 5
+        },
+        "catch_inventory": [],
+        "items": {},
+        "pending_chests": [],
+        "seen_letters": {},
+        "encyclopedia": {},
+        "stats": {
+          "total_casts": 0,
+          "total_caught": 0,
+          "total_chests": 0,
+          "total_dives": 0
+        },
+        "local_dry": 0,
+        "fever": 0,
+        "free_bait": 0,
+        "oxygen": 0,
+        "oxygen_ever": false,
+        "dive_unlocked": [],
+        "map_fragments": {}
+      },
+      "joined_at": 0.0,
+      "last_action": 0.0,
+      "last_seen": 0.0,
+      "txn_cache": {},
+      "last_catch": null
+    }
+  },
+  "feed": [
+    {
+      "id": 1,
+      "ts": 0.0,
+      "type": "chat",
+      "player": "player1",
+      "name": "player1",
+      "text": "示例消息：塘开张了。"
+    }
+  ],
+  "next_feed_id": 2
+}

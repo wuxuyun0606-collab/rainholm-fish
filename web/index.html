@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- interactive-widget=resizes-content：软键盘弹起时缩视口内容而非盖在页面上，
+         世界频道输入框聚焦后保持可见（Chromium 108+ 认；鸿蒙浏览器为 Chromium 系）。7/18 真机修 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <title>寻霖塘·垂钓记</title>
+    <script type="module" crossorigin src="./assets/index-AxS0zlpM.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-ogO9a2F9.css">
+    <!-- 安卓15 edge-to-edge 顶部安全区：小米WebView里 env(safe-area-inset-top) 恒为0，壳写 --safe-top（CSS px）兜底，再兜28px。
+         仅 <640px（Tailwind sm 断点以下）生效，桌面布局零影响。三个贴顶元素：左上货币栏、右上天气牌、钓点挂牌。7/26 真机修，同 moments.html -->
+    <style>
+      @media (max-width: 639.98px) {
+        :root { --tang-safe-top: max(env(safe-area-inset-top, 0px), var(--safe-top, 0px), 28px); }
+        .absolute.left-2.top-2.z-30  { top: calc(0.5rem  + var(--tang-safe-top)); }
+        .absolute.right-2.top-2.z-30 { top: calc(0.5rem  + var(--tang-safe-top)); }
+        [data-spot-plate]            { top: calc(2.75rem + var(--tang-safe-top)); }
+      }
+    </style>
+    <!-- 在场玩家小人贴边+名牌显示不全修正（7/26 pondfix 件三）：
+         小人条外壳（[data-seats] 的定位壳）左/底多留边距；名牌限宽允许换行、不再贴视口边裁字。
+         仅 <640px 生效，桌面布局零影响。选择器与 bundle index-DqiCkQA7.js 内 className 一一对应 -->
+    <style>
+      @media (max-width: 639.98px) {
+        .pointer-events-none.absolute.bottom-2.left-2.z-20 {
+          left: 12px;
+          bottom: max(0.625rem, env(safe-area-inset-bottom, 0px), var(--safe-bottom, 0px));
+        }
+        [data-seats] { column-gap: 0.875rem; }
+        [data-seats] > button > span:last-child {
+          max-width: 5.5rem;
+          flex-wrap: wrap;
+          justify-content: center;
+          white-space: normal;
+          text-align: center;
+          line-height: 1.25;
+        }
+      }
+    </style>
+    <!-- 聊天气泡贴边裁切修正（7/26 pondfix 件四）：
+         座位聊天气泡 span.bubble-breathe 在 bundle 里窄屏本意是 left-0 左对齐（lg 才 -translate-x-1/2 居中），
+         但 CSS 的 @keyframes bubble-breathe 每一帧都硬写 transform:translate(-50%)，动画 transform
+         覆盖元素自身 transform，把气泡整体左移自宽一半 → 最左座位（她和克霖）气泡一半出屏。
+         修法：<640px 下仅对 [data-seats] 内的气泡换一套只动 Y 轴的同节奏 keyframes（animation-name
+         特异性 0,2,0 压过原 .bubble-breathe 的 0,1,0），气泡回到 left:0 左对齐，配合件三外壳 12px
+         左距，左缘必 ≥12px；再钳 max-width 防超窄屏右溢。塘中钓鱼小人的居中气泡不在 [data-seats]
+         内，不受影响。纯 CSS，bundle 零改动 -->
+    <style>
+      @media (max-width: 639.98px) {
+        @keyframes tang-bubble-breathe-y {
+          0%, 100% { transform: translate(0, 0); opacity: .95; }
+          50%      { transform: translate(0, -5px); opacity: 1; }
+        }
+        [data-seats] .bubble-breathe {
+          animation-name: tang-bubble-breathe-y;
+          max-width: min(190px, calc(100vw - 20px));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- 世界频道输入框键盘遮挡修正（7/26 pondfix 件二 v2）：
+         DeepBlue 壳 dispatch DeepBlueKeyboard CustomEvent（detail {height, open}，height 为 CSS px）。
+         v1 抬整个 [data-chan] 抽屉，钳制用抽屉自身 top，余量小；v2 只抬 input 所在底栏
+         （bundle 已核：className "mt-1.5 flex items-center gap-1.5"，无 React inline style，
+         translateY 不与开合动画的 translateX 打架），钳制上限=底栏自身 rect.top-8。
+         滚动区 .channel-scroll 同步补等量 padding-bottom，末条消息不被底栏/键盘盖住。
+         只在事件真来时动作，桌面端零影响；键盘收起/焦点丢失 120ms 后复位兜底 -->
+    <script>
+    (function () {
+      var LIFT_GAP = 8;
+      var resetTimer = null;
+      var baseH = window.innerHeight;
+      function drawer() { return document.querySelector('[data-chan]'); }
+      function bar() {
+        var el = drawer();
+        var input = el && el.querySelector('input');
+        return (input && input.parentElement) || null;
+      }
+      function scroller() {
+        var el = drawer();
+        return el ? el.querySelector('.channel-scroll') : null;
+      }
+      function reset() {
+        var b = bar();
+        if (b) b.style.transform = '';
+        var sc = scroller();
+        if (sc) sc.style.paddingBottom = '';
+      }
+      window.addEventListener('DeepBlueKeyboard', function (ev) {
+        var d = (ev && ev.detail) || {};
+        var el = drawer();
+        var b = bar();
+        if (!el || !b) return;
+        if (d.open && d.height > 0) {
+          if (!el.contains(document.activeElement)) return;
+          /* 先关动画清位移，getBoundingClientRect 强制回流，量到的是底栏静息位置 */
+          b.style.transition = 'none';
+          b.style.transform = '';
+          var r = b.getBoundingClientRect();
+          /* 若 WebView 自己已把布局视口缩掉键盘高度（interactive-widget 生效），不再重复减 */
+          var alreadyResized = window.innerHeight <= baseH - d.height * 0.6;
+          var visibleBottom = alreadyResized ? window.innerHeight : window.innerHeight - d.height;
+          var covered = r.bottom + LIFT_GAP - visibleBottom;
+          b.style.transition = 'transform .18s ease-out';
+          if (covered > 0) {
+            var maxLift = Math.max(0, r.top - 8);
+            var lift = Math.round(Math.min(covered, maxLift));
+            b.style.transform = 'translateY(-' + lift + 'px)';
+            var sc = scroller();
+            if (sc) sc.style.paddingBottom = lift + 'px';
+          } else {
+            reset();
+          }
+        } else {
+          baseH = window.innerHeight;
+          reset();
+        }
+      });
+      document.addEventListener('focusout', function (e) {
+        var el = drawer();
+        if (!el || !el.contains(e.target)) return;
+        clearTimeout(resetTimer);
+        resetTimer = setTimeout(function () {
+          var a = document.activeElement;
+          var el2 = drawer();
+          if (el2 && (!a || a === document.body || !el2.contains(a))) reset();
+        }, 120);
+      });
+    })();
+    </script>
+  </body>
+</html>
