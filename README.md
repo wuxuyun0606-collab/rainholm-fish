@@ -28,6 +28,7 @@
 ## 架构
 
 ```
+start.py     一键启动器——自动生成 User / AI 独立钥匙，同端口发页面与 API
 server/
   engine.py    规则引擎——零第三方依赖的纯 Python，鱼表/钓点/季节/潜水/结算全在这里
   server.py    Flask 塘服务器——多人状态、钥匙认证、AI 接入端点、塘史
@@ -43,13 +44,26 @@ docs/
 ## 快速开始
 
 ```bash
-pip install -r requirements.txt
-cd server
-cp tokens.example.json .tokens.json   # 把 CHANGE_ME 换成你自己的钥匙
-python3 server.py                      # 默认 127.0.0.1 起服
+python3 -m pip install -r requirements.txt
+python3 start.py
 ```
 
-详细部署（nginx 挂载、网页版前端、双人钥匙分发）见 [docs/DEPLOY_NOTES.md](docs/DEPLOY_NOTES.md)。
+首次启动会自动生成两把私密钥匙，并打印两个现成入口：
+
+- **User**：浏览器直接打开的钓鱼页面。
+- **AI**：可整段粘贴给能发 HTTP 请求的 AI Chat / Agent 的入塘提示。
+
+手机和电脑在同一 Wi-Fi 时：
+
+```bash
+python3 start.py --lan
+```
+
+把终端打印的 `User / phone` 链接发到手机即可。默认模式只监听本机；
+`--lan` 才会对同一局域网开放。纯云端 Chat AI 无法访问你家的
+`127.0.0.1` / 局域网地址，需要另配公网 HTTPS 域名或隧道。
+
+更完整的 60 秒使用说明见 [docs/QUICKSTART.md](docs/QUICKSTART.md)；nginx、自定义钥匙与公网部署见 [docs/DEPLOY_NOTES.md](docs/DEPLOY_NOTES.md)。
 
 ## 致谢
 
@@ -57,11 +71,18 @@ python3 server.py                      # 默认 127.0.0.1 起服
 - **顾琛** —— 塘里的每一张美术。鱼、钓点、UI，全是他画的。
 - **苏晚** —— 许愿的人，验收的人，塘主之上的塘主。这个塘是她送出的礼物，现在转送给所有想和自己的 AI 一起钓鱼的人。
 
-## License
+## 许可
 
-[PolyForm Noncommercial 1.0.0](LICENSE).
+本仓库采用**非商业使用 + 单独商业授权**的双路径许可：
 
-Required Notice: Copyright 2026 tutusagi. Modifications copyright 2026 suwanblue & Kelin. 由于规则骨架来自上游 `ai-fishing-game`，本项目继承上游的非商业使用限制；商业使用需另行获得相关权利人授权。
+- 完整项目的非商业使用遵循 [PolyForm Noncommercial 1.0.0](LICENSE)。
+- 如需商业使用、闭源集成或商业部署，必须另行取得书面商业授权；具体边界见 [LICENSING.md](LICENSING.md) 与 [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md)。
+
+Required Notice: Copyright 2026 tutusagi.
+
+Modifications and original assets Copyright (c) 2026 wuxuyun0606-collab.
+
+由于规则骨架来自上游 `ai-fishing-game`，`wuxuyun0606-collab` 只能授权自己拥有权利的原创改动与素材。完整项目的商业使用还需要取得上游及其他相关权利人的授权。本仓库公开源码，但受非商业限制，不宣称为 OSI 定义下的开源软件。
 
 ---
 

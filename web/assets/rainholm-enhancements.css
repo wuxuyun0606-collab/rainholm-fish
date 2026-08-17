@@ -1,0 +1,685 @@
+#rainholm-unlock-root {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  pointer-events: none;
+}
+
+.rainholm-pond-ripples {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  contain: layout paint;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.rainholm-pond-ripple {
+  position: absolute;
+  left: var(--pond-ripple-x);
+  top: var(--pond-ripple-y);
+  width: clamp(104px, var(--pond-ripple-size), 220px);
+  aspect-ratio: 3.35 / 1;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 0 3px rgba(242, 253, 255, .5));
+}
+
+.rainholm-pond-ripple__ring {
+  position: absolute;
+  inset: 0;
+  border: 1.35px solid rgba(242, 250, 255, .92);
+  border-radius: 50%;
+  box-shadow:
+    0 0 4px rgba(255, 255, 255, .72),
+    0 1px 1px rgba(39, 118, 139, .52),
+    inset 0 0 3px rgba(222, 248, 255, .46);
+  opacity: 0;
+  transform: scale(.18);
+  animation: rainholm-silver-ring var(--pond-ripple-duration) cubic-bezier(.18, .72, .24, 1) infinite;
+  animation-delay: var(--pond-ripple-delay);
+  will-change: transform, opacity;
+}
+
+.rainholm-pond-ripple__ring:nth-child(2) {
+  border-color: rgba(232, 246, 252, .84);
+  animation-delay: calc(var(--pond-ripple-delay) + .78s);
+}
+
+.rainholm-pond-ripple__ring:nth-child(3) {
+  border-color: rgba(248, 252, 255, .76);
+  animation-delay: calc(var(--pond-ripple-delay) + 1.56s);
+}
+
+.rainholm-unlock {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.rainholm-unlock__veil {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 24, 28, .62);
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  animation: rainholm-veil-in .42s ease-out forwards;
+}
+
+.rainholm-unlock__card {
+  position: relative;
+  width: min(88vw, 560px);
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border: 3px solid #c9a86f;
+  border-radius: 18px;
+  background: #173337;
+  box-shadow: 0 24px 72px rgba(5, 18, 20, .62), inset 0 0 0 1px rgba(255, 244, 204, .35);
+  opacity: 0;
+  transform: translateY(22px) scale(.88);
+  animation: rainholm-map-open .72s cubic-bezier(.16, 1, .3, 1) .12s forwards;
+}
+
+.rainholm-unlock__card::before,
+.rainholm-unlock__card::after {
+  content: "";
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: 46%;
+  width: 64%;
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 228, 145, .62);
+  border-radius: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(.25);
+  animation: rainholm-map-ring 1.5s ease-out .4s forwards;
+}
+
+.rainholm-unlock__card::after {
+  width: 84%;
+  animation-delay: .64s;
+}
+
+.rainholm-unlock__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.08);
+  animation: rainholm-map-image 4.6s ease-out forwards;
+}
+
+.rainholm-unlock__shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(5, 22, 26, .06) 22%, rgba(5, 20, 23, .9) 100%);
+}
+
+.rainholm-unlock__copy {
+  position: absolute;
+  z-index: 4;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 24px 26px 22px;
+  color: #f8efd8;
+  text-align: left;
+  text-shadow: 0 2px 8px rgba(3, 14, 17, .9);
+}
+
+.rainholm-unlock__label {
+  margin-bottom: 6px;
+  color: #f0cb73;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .18em;
+}
+
+.rainholm-unlock__title {
+  margin: 0;
+  font-family: "STKaiti", "KaiTi", serif;
+  font-size: clamp(30px, 7vw, 50px);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: .08em;
+}
+
+.rainholm-unlock__hint {
+  margin: 9px 0 0;
+  color: #e9ddbf;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.rainholm-unlock--leaving {
+  animation: rainholm-unlock-out .5s ease-in forwards;
+}
+
+.river-god-quiz button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.river-god-quiz {
+  position: fixed;
+  z-index: 110;
+  inset: 0;
+  isolation: isolate;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: max(20px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  background:
+    radial-gradient(circle at 22% 38%, rgba(122, 230, 225, .2), transparent 25%),
+    radial-gradient(circle at 76% 72%, rgba(238, 211, 125, .14), transparent 28%),
+    #09282e;
+  animation: river-god-overlay-in .3s ease-out both;
+}
+
+.river-god-quiz__map {
+  position: fixed;
+  z-index: 0;
+  inset: -24px;
+  width: calc(100% + 48px);
+  height: calc(100% + 48px);
+  object-fit: cover;
+  opacity: .88;
+  filter: blur(12px) saturate(.72) brightness(.58);
+  transform: scale(1.045);
+  pointer-events: none;
+  user-select: none;
+}
+
+.river-god-quiz::before,
+.river-god-quiz::after {
+  content: "";
+  position: fixed;
+  z-index: 1;
+  width: 280px;
+  height: 76px;
+  border: 2px solid rgba(165, 238, 225, .25);
+  border-radius: 50%;
+  animation: river-god-ripple 4s ease-out infinite;
+}
+
+.river-god-quiz::before { left: 6vw; bottom: 12vh; }
+.river-god-quiz::after { right: 8vw; top: 14vh; animation-delay: 1.5s; }
+
+.river-god-quiz__scene {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(260px, .78fr) minmax(430px, 1.22fr);
+  gap: clamp(10px, 2.4vw, 28px);
+  align-items: center;
+  width: min(100%, 1060px);
+  min-height: calc(100vh - 48px);
+  margin: 0 auto;
+}
+
+.river-god-quiz__close {
+  position: absolute;
+  z-index: 8;
+  top: max(2px, env(safe-area-inset-top));
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 2px solid rgba(237, 231, 197, .82);
+  border-radius: 50%;
+  background: rgba(26, 67, 68, .92);
+  color: #fff8da;
+  font: 700 28px/1 system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 5px 14px rgba(2, 20, 24, .35);
+}
+
+.river-god-quiz__close:hover { background: #397e76; }
+.river-god-quiz__close:active { transform: scale(.95); }
+
+.river-god-quiz__character {
+  position: relative;
+  align-self: center;
+  padding: 16px 6px 20px;
+  text-align: center;
+  animation: river-god-character-in .62s cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.river-god-quiz__portrait {
+  display: block;
+  width: min(100%, 430px);
+  aspect-ratio: 1;
+  margin: 0 auto;
+  object-fit: contain;
+  filter: drop-shadow(0 22px 26px rgba(0, 24, 29, .46));
+  animation: river-god-float 3.2s ease-in-out infinite;
+}
+
+.river-god-quiz__name {
+  position: relative;
+  z-index: 2;
+  display: inline-block;
+  margin-top: -15px;
+  padding: 7px 18px;
+  border: 2px solid #e8d28a;
+  border-radius: 999px;
+  background: #315f5a;
+  color: #fff3c8;
+  font: 900 18px/1 "STKaiti", "KaiTi", serif;
+  box-shadow: 0 4px 0 #173f3e;
+}
+
+.river-god-quiz__speech {
+  position: relative;
+  max-width: 370px;
+  margin: 16px auto 0;
+  padding: 13px 16px;
+  border: 2px solid rgba(233, 218, 165, .88);
+  border-radius: 18px;
+  background: rgba(250, 245, 220, .96);
+  color: #374a43;
+  font: 700 15px/1.55 system-ui, sans-serif;
+  text-align: left;
+  box-shadow: 0 10px 28px rgba(0, 25, 29, .28);
+}
+
+.river-god-quiz__speech::before {
+  content: "";
+  position: absolute;
+  left: 26%;
+  top: -10px;
+  width: 16px;
+  height: 16px;
+  border-top: 2px solid rgba(233, 218, 165, .88);
+  border-left: 2px solid rgba(233, 218, 165, .88);
+  background: #faf5dc;
+  transform: rotate(45deg);
+}
+
+.river-god-quiz__sheet {
+  position: relative;
+  width: min(100%, 660px);
+  min-height: min(690px, calc(100vh - 54px));
+  justify-self: center;
+  overflow: hidden;
+  border-radius: 18px;
+  background: url("./river-god-answer-scroll.png") center / 100% 100% no-repeat;
+  filter: drop-shadow(0 24px 34px rgba(0, 20, 23, .48));
+  animation: river-god-sheet-in .58s cubic-bezier(.16, 1, .3, 1) .08s both;
+}
+
+.river-god-quiz__sheet-inner {
+  position: absolute;
+  inset: 10.5% 12% 10.5%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 3% 4.5% 2%;
+  color: #3e4b3d;
+  scrollbar-width: thin;
+  scrollbar-color: #96bbaa transparent;
+}
+
+.river-god-quiz__heading {
+  text-align: center;
+}
+
+.river-god-quiz__heading h2 {
+  margin: 0;
+  color: #315e55;
+  font-family: "STKaiti", "KaiTi", serif;
+  font-size: clamp(24px, 3vw, 34px);
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.river-god-quiz__heading p {
+  margin: 5px 0 0;
+  color: #786c4b;
+  font: 600 12px/1.45 system-ui, sans-serif;
+}
+
+.river-god-quiz__progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 13px 0 14px;
+}
+
+.river-god-quiz__pip {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border: 1.5px solid #a98b50;
+  border-radius: 50%;
+  background: rgba(255, 251, 226, .8);
+  color: #8b7248;
+  font: 800 12px/1 system-ui, sans-serif;
+}
+
+.river-god-quiz__pip.is-done {
+  border-color: #4f8275;
+  background: #6aa191;
+  color: #fffce9;
+}
+
+.river-god-quiz__progress strong {
+  margin-left: 4px;
+  color: #4b665b;
+  font: 800 12px/1 system-ui, sans-serif;
+}
+
+.river-god-quiz__question-number {
+  margin-bottom: 5px;
+  color: #9b7133;
+  font: 900 12px/1.2 system-ui, sans-serif;
+  letter-spacing: .08em;
+}
+
+.river-god-quiz__question {
+  min-height: 2.8em;
+  margin: 0 0 13px;
+  color: #35483f;
+  font: 900 clamp(17px, 2vw, 21px)/1.42 "STKaiti", "KaiTi", serif;
+}
+
+.river-god-quiz__choices {
+  display: grid;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.river-god-quiz__choice {
+  display: grid;
+  grid-template-columns: 31px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 50px;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 9px 12px 9px 9px;
+  border: 2px solid #9a8a5d;
+  border-radius: 14px;
+  background: rgba(255, 252, 229, .86);
+  color: #394c43;
+  font: 700 13px/1.42 system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 3px 0 rgba(135, 118, 71, .32);
+  transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+
+.river-god-quiz__choice > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.river-god-quiz__choice > span:first-child {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  border-radius: 50%;
+  background: #4e7f73;
+  color: #fff7d5;
+  font-weight: 900;
+}
+
+.river-god-quiz__choice:hover,
+.river-god-quiz__choice:focus-visible {
+  border-color: #4e7f73;
+  background: #f5fff4;
+  outline: 3px solid rgba(78, 127, 115, .23);
+  outline-offset: 1px;
+}
+
+.river-god-quiz__choice:active,
+.river-god-quiz__choice.is-selected {
+  transform: translateY(2px) scale(.995);
+  border-color: #c69239;
+  background: #fff0bf;
+  box-shadow: 0 1px 0 rgba(135, 118, 71, .32);
+}
+
+.river-god-quiz__choice:disabled {
+  cursor: wait;
+  opacity: .72;
+}
+
+.river-god-quiz__feedback {
+  min-height: 1.4em;
+  margin-top: 10px;
+  color: #6d644e;
+  font: 600 12px/1.45 system-ui, sans-serif;
+  text-align: center;
+}
+
+.river-god-quiz__reward {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  width: min(100%, 330px);
+  margin: 4px auto 3px;
+  padding: 15px 20px;
+  border: 3px double #b78935;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #fff9d6, #f5d77c);
+  color: #79501c;
+  box-shadow: 0 8px 24px rgba(152, 103, 26, .2);
+}
+
+.river-god-quiz__reward span {
+  grid-column: 1 / -1;
+  font: 800 13px/1 system-ui, sans-serif;
+}
+
+.river-god-quiz__reward strong {
+  font: 900 clamp(34px, 6vw, 50px)/1 system-ui, sans-serif;
+}
+
+.river-god-quiz__reward small {
+  padding-bottom: 5px;
+  font: 900 14px/1 system-ui, sans-serif;
+}
+
+.river-god-quiz__take {
+  width: min(100%, 260px);
+  margin: 8px auto 0;
+  padding: 11px 20px;
+  border: 2px solid #315f56;
+  border-radius: 999px;
+  background: linear-gradient(#78b2a0, #4f8174);
+  color: #fffbe7;
+  font: 900 15px/1 system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 4px 0 #315f56;
+}
+
+.river-god-quiz__take:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 #315f56;
+}
+
+.river-god-toast {
+  position: fixed;
+  z-index: 112;
+  left: 50%;
+  top: max(20px, env(safe-area-inset-top));
+  width: min(88vw, 560px);
+  padding: 12px 18px;
+  border: 2px solid #dfc477;
+  border-radius: 16px;
+  background: rgba(32, 67, 63, .97);
+  color: #fff4ca;
+  box-shadow: 0 14px 36px rgba(5, 18, 20, .42);
+  font: 800 14px/1.55 system-ui, sans-serif;
+  text-align: center;
+  transform: translate(-50%, -12px);
+  opacity: 0;
+  animation: river-god-toast-in .36s ease-out forwards;
+}
+
+.river-god-toast--leaving {
+  animation: river-god-toast-out .5s ease-in forwards;
+}
+
+@keyframes rainholm-veil-in { to { opacity: 1; } }
+@keyframes rainholm-silver-ring {
+  0% { opacity: 0; transform: scale(.18); }
+  9% { opacity: .9; }
+  44% { opacity: .52; }
+  68%, 100% { opacity: 0; transform: scale(1.24); }
+}
+@keyframes rainholm-map-open { to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes rainholm-map-ring {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.25); }
+  28% { opacity: .75; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.15); }
+}
+@keyframes rainholm-map-image { to { transform: scale(1); } }
+@keyframes rainholm-unlock-out { to { opacity: 0; transform: scale(1.025); } }
+@keyframes river-god-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes river-god-character-in {
+  from { opacity: 0; transform: translateY(34px) scale(.88); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes river-god-sheet-in {
+  from { opacity: 0; transform: translateX(32px) rotate(1.5deg); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes river-god-float {
+  0%, 100% { transform: translateY(0) rotate(-.4deg); }
+  50% { transform: translateY(-8px) rotate(.4deg); }
+}
+@keyframes river-god-ripple {
+  0% { opacity: 0; transform: scale(.45); }
+  28% { opacity: .65; }
+  100% { opacity: 0; transform: scale(1.6); }
+}
+@keyframes river-god-toast-in { to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes river-god-toast-out { to { opacity: 0; transform: translate(-50%, -8px); } }
+
+@media (max-width: 759.98px) {
+  .rainholm-unlock__card { width: min(92vw, 500px); aspect-ratio: 4 / 5; }
+  .rainholm-unlock__copy { padding: 20px; }
+  .rainholm-unlock__hint { font-size: 13px; }
+
+  .river-god-quiz { padding-inline: 8px; }
+  .river-god-quiz__scene {
+    display: block;
+    width: min(100%, 620px);
+    min-height: 0;
+    padding: 18px 0 18px;
+  }
+  .river-god-quiz__close { position: fixed; top: max(10px, env(safe-area-inset-top)); right: 10px; }
+  .river-god-quiz__character {
+    position: absolute;
+    z-index: 4;
+    top: 18px;
+    left: 0;
+    width: 100%;
+    height: 210px;
+    padding: 0;
+    pointer-events: none;
+  }
+  .river-god-quiz__portrait {
+    position: absolute;
+    top: 0;
+    left: -4px;
+    width: min(48vw, 184px);
+    margin: 0;
+    filter: drop-shadow(0 12px 18px rgba(0, 24, 29, .42));
+    animation: none;
+  }
+  .river-god-quiz__name {
+    position: absolute;
+    z-index: 5;
+    top: min(42vw, 160px);
+    left: 5px;
+    margin: 0;
+    padding: 5px 12px;
+    font-size: 13px;
+  }
+  .river-god-quiz__speech {
+    position: absolute;
+    z-index: 5;
+    top: 42px;
+    right: 3%;
+    width: 53%;
+    max-width: 330px;
+    max-height: 104px;
+    margin: 0;
+    overflow-y: auto;
+    padding: 9px 11px;
+    border-radius: 15px;
+    font-size: 12px;
+    line-height: 1.45;
+    pointer-events: auto;
+  }
+  .river-god-quiz__speech::before {
+    top: 38%;
+    left: -9px;
+    border-top: 0;
+    border-right: 0;
+    border-bottom: 2px solid rgba(233, 218, 165, .88);
+    border-left: 2px solid rgba(233, 218, 165, .88);
+  }
+  .river-god-quiz__sheet {
+    width: min(100%, 600px);
+    min-height: 650px;
+    margin-top: 138px;
+  }
+  .river-god-quiz__sheet-inner { inset: 13.5% 11.5% 10.5%; padding-inline: 5.5%; }
+  .river-god-quiz__heading h2 { font-size: 24px; }
+  .river-god-quiz__question { font-size: 17px; }
+  .river-god-quiz__choice { font-size: 12px; }
+}
+
+@media (max-width: 379.98px) {
+  .river-god-quiz__sheet { min-height: 630px; margin-top: 130px; }
+  .river-god-quiz__sheet-inner { inset-inline: 10.5%; padding-inline: 6%; }
+  .river-god-quiz__speech { top: 36px; right: 2%; width: 54%; max-height: 96px; }
+  .river-god-quiz__heading p { font-size: 11px; }
+  .river-god-quiz__choice { grid-template-columns: 28px minmax(0, 1fr); gap: 7px; padding: 8px; }
+  .river-god-quiz__choice > span:first-child { width: 28px; height: 28px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rainholm-pond-ripples {
+    display: none;
+  }
+  .rainholm-unlock__veil,
+  .rainholm-unlock__card,
+  .rainholm-unlock__card::before,
+  .rainholm-unlock__card::after,
+  .rainholm-unlock__image,
+  .rainholm-unlock--leaving,
+  .river-god-quiz,
+  .river-god-quiz::before,
+  .river-god-quiz::after,
+  .river-god-quiz__character,
+  .river-god-quiz__portrait,
+  .river-god-quiz__sheet,
+  .river-god-toast,
+  .river-god-toast--leaving {
+    animation: none;
+  }
+  .rainholm-unlock__veil,
+  .rainholm-unlock__card,
+  .river-god-toast { opacity: 1; }
+  .rainholm-unlock__card,
+  .river-god-toast { transform: none; }
+  .river-god-toast { transform: translateX(-50%); }
+}

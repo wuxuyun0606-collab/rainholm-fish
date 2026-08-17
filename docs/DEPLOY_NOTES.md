@@ -17,6 +17,16 @@ web/      前端（React/Vite 预构建产物）+ 全套美术
 
 ## 起后端
 
+本机使用优先走根目录的一键启动器：
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 start.py
+```
+
+它会自动生成 User / AI 钥匙，并从同一个 Flask 端口发前端与 API。
+以下保留为手动部署方式：
+
 ```bash
 pip install -r requirements.txt   # 只有 flask；引擎零第三方依赖
 cd server
@@ -24,8 +34,8 @@ cp tokens.example.json .tokens.json   # 把 CHANGE_ME 换成长随机串（opens
 python3 server.py
 ```
 
-- 监听 `127.0.0.1:5210`（写死在 `server.py` 末尾 `app.run(...)`），设计上只经
-  反向代理对外，不直接暴露。
+- 直接运行 `server.py` 监听 `127.0.0.1:5210`；`start.py` 可用 `--port`、
+  `--host` 或 `--lan` 调整。默认仍只监听本机。
 - 存档：`server/pond_save.json`，首次启动自动创建，原子写盘（tmp + rename）。
   `pond_save.example.json` 是用引擎默认值生成的双人示例，仅供看结构，不是启动
   必需品。
@@ -36,9 +46,9 @@ python3 server.py
   - `.tokens.json` 的键名是槽位名（见 `server.py` 的 `TOKEN_SLOT_TO_PLAYER`），
     值是钥匙本体。钥匙全文不进日志（werkzeug 访问日志已关）。
   - 生产调用优先使用 `X-Pond-Key` 请求头；查询参数会暴露在浏览器历史和上游代理日志中。
-- AI 接入端点 `/api/pond/ai/*`（brief / poll / ears）一律要求显式 key。返回的
-  curl 样例里的公网基址在 `server.py` 的 `AI_PUBLIC_BASE`，部署时改成你自己的
-  域名。
+- AI 接入端点 `/api/pond/ai/*`（brief / poll / ears）一律要求显式 key。
+  curl 样例默认按当前请求地址动态生成；反向代理后也可设置
+  `RAINHOLM_PUBLIC_BASE=https://pond.example.com/api/pond`。
 
 ## 挂前端
 
@@ -66,17 +76,10 @@ server {
 - API 地址不需要配置：前端写死同源相对路径 `/api/pond`，反代对了就通。
 - `web/index.html` 里 bundle 的引用已改为相对路径 `./assets/...`，挂在任意
   子路径下都能加载。
-- 通用头像池在 `web/assets/ui/avatars/pool/`（32 款 160×160），后端
+- 通用头像池在 `web/assets/ui/avatars/pool/`（9 款 160×160：3 男、3 女、3 个小动物），后端
   `/api/pond/avatars` 会透出清单，前端按 `path_prefix` 相对加载。
 
 ## 本地裸跑（不架 nginx）
 
-`cd server && python3 server.py`，然后浏览器开 `http://127.0.0.1:5210` 是纯 API
-（没有静态路由）；页面得另起一个静态服务，例如：
-
-```bash
-cd web && python3 -m http.server 8080   # 页面在 http://127.0.0.1:8080
-```
-
-此时页面对 `/api/pond` 的请求会打到 8080 落空——本地开发要么配个带代理的静态
-服务，要么直接上 nginx。设计取向就是「nginx 统一门面」。
+`python3 start.py`。Flask 现在直接提供 `web/` 和 `/api/pond/*`，不需要再起
+第二个静态服务。手机同 Wi-Fi 验收用 `python3 start.py --lan`。

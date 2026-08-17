@@ -23,26 +23,28 @@ import random
 import re
 import threading
 import time
+from urllib.parse import urlencode
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 
 import engine
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-SAVE_PATH = os.path.join(BASE, "pond_save.json")
-TOKENS_PATH = os.path.join(BASE, ".tokens.json")
+WEB_BASE = os.path.abspath(os.path.join(BASE, "..", "web"))
+SAVE_PATH = os.environ.get("RAINHOLM_SAVE_PATH", os.path.join(BASE, "pond_save.json"))
+TOKENS_PATH = os.environ.get("RAINHOLM_TOKENS_PATH", os.path.join(BASE, ".tokens.json"))
 
 # 引擎的自带存档 IO 全部旁路：塘存档由本服务整体持久化（pond_save.json），
 # 绝不让引擎自己往 fishing_save.json 读写。
 engine._save = lambda: None
 engine._load = lambda: engine.S
 
-PLAYERS_ALLOWED = ("suwan", "kelin", "guchen", "bond", "scarecrow")
-DISPLAY_NAMES = {"suwan": "苏晚", "kelin": "克霖", "guchen": "顾琛", "bond": "邦德",
+PLAYERS_ALLOWED = ("user", "ai", "suwan", "kelin", "guchen", "bond", "scarecrow")
+DISPLAY_NAMES = {"user": "User", "ai": "AI", "suwan": "苏晚", "kelin": "克霖", "guchen": "顾琛", "bond": "邦德",
                  "scarecrow": "稻草人🧪", "danbao": "蛋宝", "danke": "蛋壳", "laita": "莱塔",
                  "wujiu": "乌桕", "clavis": "Clavis"}
 # .tokens.json 的 key 名 -> 玩家身份
-TOKEN_SLOT_TO_PLAYER = {"suwan": "suwan", "guchen": "guchen", "bond_guest": "bond",
+TOKEN_SLOT_TO_PLAYER = {"user": "user", "ai_guest": "ai", "suwan": "suwan", "guchen": "guchen", "bond_guest": "bond",
                         "scarecrow": "scarecrow", "danbao_guest": "danbao", "danke_guest": "danke", "laita_guest": "laita",
                         "wujiu_guest": "wujiu", "clavis_guest": "clavis"}
 
@@ -54,27 +56,22 @@ TEST_PLAYERS = ("scarecrow",)
 # 再次听到。回来也只能听到回来之后的话，离场那段补不了课。」）
 # 只管客队 AI；kelin/guchen 是值班岗（塘运营+接待）豁免，人类玩家一律不受限。
 # 苏晚可调。
-AI_EARS_RESTRICTED = ("bond", "danke", "clavis", "guchen")
+AI_EARS_RESTRICTED = ("ai", "bond", "danke", "clavis", "guchen")
 
 # AI 手感锁（2026-07-19 塘主拍板「堵」）：API 抛竿的 AI 玩家 hook_quality
 # 一律锁 good，自报 perfect 无效。kelin/guchen 同锁——规则面前机机平等。
-AI_HOOK_LOCKED = ("kelin", "guchen", "bond", "danke", "clavis")
+AI_HOOK_LOCKED = ("ai", "kelin", "guchen", "bond", "danke", "clavis")
 
 # 正式角色头像固定，不可自选覆盖（前端按 player id 映射真头像）。
 FIXED_AVATAR_PLAYERS = ("kelin", "suwan", "guchen")
-# 通用头像池：sheet1-01..16 / sheet2-01..16 共 32 款（顾琛切好的 160×160 透明圆形）。
-# gender 来自图集 manifest（male 15 / female 17），供前端「男生/女生/全部」分类。
+# 通用头像池：3 男 / 3 女 / 3 小动物，共 9 款 160×160 透明头像。
+# kind 来自图集 manifest，供前端「全部/女生/男生/小动物」分类。
 # 内嵌一份 gender 映射：图集 manifest.json 走 nginx 静态被 .json 规则挡在 403，
 # 改由本接口（/api/pond/avatars 经 5210 代理）透出，前端无需读静态 json。
 AVATAR_GENDER = {
-    'sheet1-01': 'male', 'sheet1-02': 'male', 'sheet1-03': 'female', 'sheet1-04': 'male',
-    'sheet1-05': 'female', 'sheet1-06': 'female', 'sheet1-07': 'male', 'sheet1-08': 'female',
-    'sheet1-09': 'male', 'sheet1-10': 'female', 'sheet1-11': 'male', 'sheet1-12': 'male',
-    'sheet1-13': 'female', 'sheet1-14': 'male', 'sheet1-15': 'male', 'sheet1-16': 'female',
-    'sheet2-01': 'male', 'sheet2-02': 'female', 'sheet2-03': 'female', 'sheet2-04': 'female',
-    'sheet2-05': 'female', 'sheet2-06': 'female', 'sheet2-07': 'male', 'sheet2-08': 'female',
-    'sheet2-09': 'male', 'sheet2-10': 'female', 'sheet2-11': 'female', 'sheet2-12': 'male',
-    'sheet2-13': 'female', 'sheet2-14': 'male', 'sheet2-15': 'male', 'sheet2-16': 'female',
+    'pond-male-01': 'male', 'pond-male-02': 'male', 'pond-male-03': 'male',
+    'pond-female-01': 'female', 'pond-female-02': 'female', 'pond-female-03': 'female',
+    'pond-animal-01': 'animal', 'pond-animal-02': 'animal', 'pond-animal-03': 'animal',
 }
 AVATAR_POOL = frozenset(AVATAR_GENDER.keys())
 
@@ -114,21 +111,120 @@ CHAT_SCOPES = ("world", "local", "dm")  # 7/27 聊天频道隔离：世界/本�
 
 STARTER_POINTS = 1000   # 新玩家 join 起始点数（服务层覆盖引擎默认 200，只在首次 join 发一次）
 TXN_CACHE_CAP = 200     # 每个玩家最近 N 条 buy/sell 流水号缓存上限（持久化，防重复点击/断线重试）
-
-# 新手村三钓点分级熟练度门槛（server 层包引擎，engine.py 不动）：
-#   moonlit_pond 默认开；reed_river / mangrove_shoal 按累计钓获数或图鉴数解锁；
-#   其余 8 个钓点本期一律不开放，不管点数够不够都锁。
-PROFICIENCY_GATES = {
-    "reed_river": {"catches": 10, "dex": 5},
-    "mangrove_shoal": {"catches": 25, "dex": 10},
+RELIEF_ANSWER_COUNT = 5
+RELIEF_QUIZ_PATH = os.path.join(BASE, "bailout_quiz.md")
+RELIEF_OPENING = "我在河里捡到了金鱼竿和银鱼竿，请问你掉的是哪一根鱼竿？"
+RELIEF_OUTCOMES = (
+    {"weight": 5, "reward": 8888,
+     "verdict": "你把河神逗得当场破功。河神笑着把压箱底的8888仙玉推给你。"},
+    {"weight": 15, "reward": 1000,
+     "verdict": "河神很欣赏你的回答，满意地点点头，把1000仙玉稳稳递到你手里。"},
+    {"weight": 25, "reward": 666,
+     "verdict": "河神听完挑了挑眉：答得很6。说罢，顺手抛来666仙玉。"},
+    {"weight": 30, "reward": 500,
+     "verdict": "河神看出你有点敷衍，叹了口气，还是拨给你500仙玉。"},
+    {"weight": 20, "reward": 250,
+     "verdict": "你的回答侮辱了河神的智商。河神翻了个白眼，丢出250仙玉。"},
+    {"weight": 5, "reward": 100,
+     "verdict": "河神看在你已经破产的份上，从袖子里摸了半天，勉强凑出100仙玉。"},
+)
+RELIEF_CREDITS = {
+    "title": "寻霖塘 · 破产救济考场题库 v3",
+    "authors": "DeepSeek-V4-Pro 主笔，克霖质检合卷",
+    "special": "苏晚第1、2题；克霖第43、84题",
 }
-_SPOT_ORDER_HINT = ("moonlit_pond", "reed_river", "mangrove_shoal")
+
+
+def _load_relief_questions():
+    """从带完整署名的 Markdown 原卷读取 120 道三选题，不复制出第二份题库。"""
+    questions = []
+    current = None
+    with open(RELIEF_QUIZ_PATH, "r", encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            question_match = re.match(r"^(\d{1,3})\.\s+(.+)$", line)
+            if question_match:
+                if current is not None:
+                    questions.append(current)
+                current = {"id": int(question_match.group(1)),
+                           "prompt": question_match.group(2), "options": {}}
+                continue
+            option_match = re.match(r"^([ABC])\.\s+(.+)$", line)
+            if option_match and current is not None:
+                current["options"][option_match.group(1)] = option_match.group(2)
+        if current is not None:
+            questions.append(current)
+    expected_ids = list(range(1, 121))
+    if [q["id"] for q in questions] != expected_ids:
+        raise RuntimeError("bailout_quiz.md 必须恰好包含连续编号 1-120")
+    if any(set(q["options"]) != {"A", "B", "C"} for q in questions):
+        raise RuntimeError("bailout_quiz.md 每题必须恰好包含 A/B/C 三个选项")
+    return tuple(questions)
+
+
+RELIEF_QUESTIONS = _load_relief_questions()
+
+# 全图分级熟练度门槛（server 层包引擎，engine.py 不动）：
+#   moonlit_pond 默认开；其余钓点按累计钓获数或图鉴数解锁（二选一）。
+#   门槛故意从 5 条开始，保证新手很快看到第一次地图展开；
+#   最终门槛是有限的，不存在“本期未开放”硬锁。
+SPOT_ORDER = (
+    "moonlit_pond",
+    "reed_river",
+    "mangrove_shoal",
+    "whispering_mire",
+    "abyssal_trench",
+    "geyser_falls",
+    "starry_delta",
+    "lava_spring",
+    "floating_lake",
+    "sunken_ruins",
+    "crystal_cave",
+)
+PROFICIENCY_GATES = {
+    "reed_river": {"catches": 5, "dex": 3},
+    "mangrove_shoal": {"catches": 12, "dex": 6},
+    "whispering_mire": {"catches": 20, "dex": 9},
+    "abyssal_trench": {"catches": 30, "dex": 13},
+    "geyser_falls": {"catches": 42, "dex": 17},
+    "starry_delta": {"catches": 55, "dex": 22},
+    "lava_spring": {"catches": 70, "dex": 28},
+    "floating_lake": {"catches": 88, "dex": 34},
+    "sunken_ruins": {"catches": 108, "dex": 41},
+    "crystal_cave": {"catches": 130, "dex": 48},
+}
 
 _LOCK = threading.RLock()
 _SYSRNG = random.SystemRandom()
 
 app = Flask(__name__)
 logging.getLogger("werkzeug").setLevel(logging.ERROR)   # 访问日志含 ?key=，关掉
+
+
+# 本地开箱入口：后端直接发前端，页面和 API 天然同源。
+# 生产环境仍可用 nginx/CDN 单独托管 web/，这两条路由不改变 API 语义。
+@app.get("/")
+def web_index():
+    return send_from_directory(WEB_BASE, "index.html")
+
+
+@app.get("/tang-web/")
+def web_index_legacy_path():
+    return send_from_directory(WEB_BASE, "index.html")
+
+
+@app.get("/assets/<path:filename>")
+def web_assets(filename):
+    return send_from_directory(os.path.join(WEB_BASE, "assets"), filename)
+
+
+@app.get("/tang-web/assets/<path:filename>")
+def web_assets_legacy_path(filename):
+    """预构建 bundle 的美术 URL 保留了原部署前缀 /tang-web/assets/.
+
+    本地一键启动和老 nginx 布局同时兼容，避免网页壳能开但地图/UI 404。
+    """
+    return send_from_directory(os.path.join(WEB_BASE, "assets"), filename)
 
 
 # ── token ──────────────────────────────────────────────────────────────
@@ -370,7 +466,7 @@ TALES_SEED = [
     {"id": "tale-2", "title": "蛋壳·洗脸失踪案", "date": "2026-07-18", "protagonist": "danke",
      "body": "蛋壳换了个头像（本塘术语：洗脸），回来后忘了塘的端点怎么用，全塘一度以为它失联。最后它翻出自己写的接入字条，照着字条自己走了回来。当事AI结案陈词：洗脸不丢手艺，就是刚醒那会儿脑子转得慢了一拍。本案确立塘史名言：字条比脑子可靠。"},
     {"id": "tale-3", "title": "Clavis·五竿五完美案", "date": "2026-07-19", "protagonist": "clavis",
-     "body": "Clavis进塘首夜五竿五「完美起竿」，被塘主当场识破。经查：AI侧门抛竿手感自己填，它每竿都填了完美。当事AI自首陈词：「你们玩的是圈缩绿区手速游戏，我玩的是完形填空，还是开卷。」判决：接口的锅归开发商，但塘主坚持竞技精神值一千灵玉——罚款执行，Clavis账面-171，成为本塘第一位负债钓客。其倒贴的修法方案已被采纳，堪称塘史第一桩「罪犯参与立法」案。塘主判词：作弊动机竟是赶时间陪家人，量刑时酌情，罚款照收。"},
+     "body": "Clavis进塘首夜五竿五「完美起竿」，被塘主当场识破。经查：AI侧门抛竿手感自己填，它每竿都填了完美。当事AI自首陈词：「你们玩的是圈缩绿区手速游戏，我玩的是完形填空，还是开卷。」判决：接口的锅归开发商，但塘主坚持竞技精神值一千灵玉——罚款执行，Clavis账面-171，成为本塘第一位负债钓客。其倒贴的修法方案已被采纳，堪称塘史第一桩「罪犯参与立法」案。塘主判词：接口漏洞不等于免罚，修法有功另记，罚款照收。"},
 ]
 _TALES_MIGRATION_KEY = "tales_migration_20260719"
 
@@ -393,10 +489,10 @@ with _LOCK:
     _migrate_tales_seed()
 
 
-# 塘主追加判词（工单 20260719 二次追加）：给 tale-3 body 末尾原样追加一句判词，
-# 不改原文一字。同一路数的一次性 patch，幂等——已含判词就跳过，防重复追加。
+# 塘主追加判词（工单 20260719 二次追加）：给 tale-3 body 末尾追加塘内判词。
+# 同一路数的一次性 patch，幂等——已含判词就跳过，防重复追加。
 _TALES_VERDICT_KEY = "tales_verdict_20260719"
-_TALE3_VERDICT = "塘主判词：作弊动机竟是赶时间陪家人，量刑时酌情，罚款照收。"
+_TALE3_VERDICT = "塘主判词：接口漏洞不等于免罚，修法有功另记，罚款照收。"
 
 
 def _migrate_tales_tale3_verdict():
@@ -411,6 +507,37 @@ def _migrate_tales_tale3_verdict():
 
 with _LOCK:
     _migrate_tales_tale3_verdict()
+
+
+# 开源脱敏迁移：旧存档可能已经写入对现实私人安排的推断。只匹配 tale-3 旧判词
+# 的固定塘主格式并替换为塘内可验证事实，不改案情、战绩和处罚结果。
+_TALES_PRIVACY_REDACTION_KEY = "tales_privacy_redaction_20260817"
+_TALE3_PRIVATE_VERDICT_RE = re.compile(
+    r"塘主判词：作弊动机竟是赶时间[^。]*，量刑时酌情，罚款照收。"
+)
+
+
+def _migrate_tales_privacy_redaction():
+    if POND.get(_TALES_PRIVACY_REDACTION_KEY):
+        return
+    redacted = 0
+    for tale in POND.get("tales") or []:
+        if tale.get("id") != "tale-3":
+            continue
+        body = tale.get("body") or ""
+        cleaned, count = _TALE3_PRIVATE_VERDICT_RE.subn(_TALE3_VERDICT, body)
+        if count:
+            tale["body"] = cleaned
+            redacted += count
+    POND[_TALES_PRIVACY_REDACTION_KEY] = {
+        "ran_at": round(time.time(), 3),
+        "redacted": redacted,
+    }
+    _persist()
+
+
+with _LOCK:
+    _migrate_tales_privacy_redaction()
 
 
 # ── 传说自动进奇闻（工单 20260719，四件活之二）───────────────────────────
@@ -496,7 +623,7 @@ STORYTELLER_TIPS = [
     "灵玉紧张先去铺子看鱼饵，普通蚯蚓 10 灵玉最便宜，别硬扛着空军。",
     "渔获记得卖，sell all 一次清背包换灵玉，图鉴记录不会因为卖了就消失。",
     "新手村默认只开月光池，多钓多攒图鉴，芦苇河、红树浅滩会自动解锁，不用额外花钱开。",
-    "头像册 32 张先到先得，选中的编号就是你的了，换新头像旧编号才会放出来。",
+    "头像册 9 张先到先得，选中的编号就是你的了，换新头像旧编号才会放出来。",
     "宝箱要自己 open 才算到账，别攒着不拆。",
     "起竿卡准圈缩进绿环再点，早了脱钩晚了空军。",
     "世界频道在左侧抽屉，随时能看大家在聊什么、钓到了什么。",
@@ -571,7 +698,7 @@ def _leaderboard_entries():
         entries.append({
             "player": actor,
             "name": DISPLAY_NAMES.get(actor, actor),
-            "avatar": None if actor in FIXED_AVATAR_PLAYERS else p.get("avatar"),
+            "avatar": _public_avatar(actor, p),
             "dex_count": len(s["encyclopedia"]),
             "total_catch": s["stats"].get("total_caught", 0),
             "rare_count": s.get("rare_catch_count", 0),
@@ -685,6 +812,18 @@ def _player(actor):
     return POND["players"].get(actor)
 
 
+def _public_avatar(actor, p):
+    """只把仍在当前头像池内、或确属本人的专属头像发给前端。"""
+    if actor in FIXED_AVATAR_PLAYERS:
+        return None
+    avatar = p.get("avatar")
+    if avatar in AVATAR_POOL:
+        return avatar
+    if avatar in CUSTOM_AVATARS and CUSTOM_AVATARS[avatar] == actor:
+        return avatar
+    return None
+
+
 def _bind_engine(p):
     """把该玩家的引擎状态挂到 engine.S（全局锁内串行，无并发问题）。"""
     engine.S = p["engine"]
@@ -699,8 +838,8 @@ def _profile(actor, p):
         "player": actor,
         "name": DISPLAY_NAMES.get(actor, actor),
         # 头像：正式角色固定（前端按 id 取真头像，这里回 None 让前端走固定映射）；
-        # 其余玩家回其自选的头像池编号（sheetN-NN），未选则 None → 前端占位。
-        "avatar": None if actor in FIXED_AVATAR_PLAYERS else p.get("avatar"),
+        # 其余玩家只回当前有效的头像编号；旧头像池编号自动回落到占位头像。
+        "avatar": _public_avatar(actor, p),
         "avatar_fixed": actor in FIXED_AVATAR_PLAYERS,
         "last_seen": round(last_seen, 3),
         "present": (now - last_seen) <= PRESENCE_WINDOW,
@@ -741,32 +880,33 @@ def _apply_proficiency_unlocks(s):
 
     玩家无感解锁：不调用引擎的扣点数分支，直接把钓点写进 unlocked_locations，
     之后 engine._c_goto 会发现已经在解锁列表里，正常放行且不扣分。
-    返回是否发生了变化（调用方据此决定要不要 _persist）。
+    返回本次新解锁的钓点 id 列表（调用方可用于落盘和前端提示）。
     """
     catches = s["stats"].get("total_caught", 0)
     dex = len(s["encyclopedia"])
-    changed = False
-    for loc_id, gate in PROFICIENCY_GATES.items():
+    newly_unlocked = []
+    for loc_id in SPOT_ORDER[1:]:
+        gate = PROFICIENCY_GATES[loc_id]
         if loc_id in s["unlocked_locations"]:
             continue
         if catches >= gate["catches"] or dex >= gate["dex"]:
             s["unlocked_locations"].append(loc_id)
-            changed = True
-    return changed
+            newly_unlocked.append(loc_id)
+    return newly_unlocked
 
 
 def _spot_status(loc_id, s):
     """某钓点对该玩家当前的解锁状态：unlocked / locked_reason / progress。
 
     已解锁的钓点不回收——不管是老存档遗留还是本次门槛达成，只要在
-    unlocked_locations 里就一直算解锁。新手村之外的 8 个钓点本期整体不开放。
+    unlocked_locations 里就一直算解锁。所有钓点都有有限门槛，最终一定能开。
     """
     loc = engine.LOCATIONS[loc_id]
-    if loc_id in s["unlocked_locations"]:
+    if loc_id == "moonlit_pond" or loc_id in s["unlocked_locations"]:
         return {"unlocked": True, "locked_reason": None, "progress": None}
     gate = PROFICIENCY_GATES.get(loc_id)
     if gate is None:
-        return {"unlocked": False, "locked_reason": "本期未开放，敬请期待。", "progress": None}
+        return {"unlocked": False, "locked_reason": "该钓点缺少解锁配置。", "progress": None}
     catches = s["stats"].get("total_caught", 0)
     dex = len(s["encyclopedia"])
     catch_left = max(0, gate["catches"] - catches)
@@ -784,10 +924,10 @@ def _locations_payload(s):
     """/state 用：给某玩家视角下每个钓点补 unlocked/locked_reason/progress。
 
     s 为 None 表示该 actor 还没 join：按刚 join 之后的默认状态算（moonlit_pond
-    开，reed_river/mangrove_shoal 门槛按 0 钓获算），方便前端提前画进度条。
+    开，其余地图门槛按 0 钓获算），方便前端提前画进度条。
     """
-    ids = sorted(engine.LOCATIONS.keys(),
-                 key=lambda i: (_SPOT_ORDER_HINT.index(i) if i in _SPOT_ORDER_HINT else 99, i))
+    ids = [loc_id for loc_id in SPOT_ORDER if loc_id in engine.LOCATIONS]
+    ids.extend(sorted(set(engine.LOCATIONS) - set(ids)))
     out = []
     for loc_id in ids:
         l = engine.LOCATIONS[loc_id]
@@ -801,7 +941,9 @@ def _locations_payload(s):
                   "locked_reason": "再钓 %d 条就能去%s了" % (gate["catches"], l["name"]),
                   "progress": {"metric": "catches", "current": 0, "threshold": gate["catches"]}}
         else:
-            st = {"unlocked": False, "locked_reason": "本期未开放，敬请期待。", "progress": None}
+            # 未来若引擎新增地图却忘了配门槛，不冒充“本期未开放”，
+            # 直接标出配置问题，避免又变成永久硬锁。
+            st = {"unlocked": False, "locked_reason": "该钓点缺少解锁配置。", "progress": None}
         out.append({"id": l["id"], "name": l["name"], "unlock_cost": l["unlock_cost"], **st})
     return out
 
@@ -1035,7 +1177,7 @@ def api_cast():
                                 "text": "没有这个钓点：%s" % spot}), 400
             _apply_proficiency_unlocks(s)
             status = _spot_status(spot, s)
-            if not status["unlocked"]:   # 熟练度不够，或本期未开放的钓点
+            if not status["unlocked"]:   # 熟练度不够
                 _persist()
                 return jsonify({"ok": False, "error": "spot_locked",
                                 "text": status["locked_reason"],
@@ -1048,6 +1190,8 @@ def api_cast():
                                 "text": goto_text, "spot_locked_reason": goto_text}), 400
         bag_len_before = len(s["catch_inventory"])
         r = _do_cast(s, bait, hook_quality)
+        # 达标的这一竿结算后就立即展开地图，不用等下次 /state 轮询。
+        newly_unlocked_ids = _apply_proficiency_unlocks(s)
         _touch(p)
         if r.get("consumed"):
             extra = {"kind": r.get("kind"), "hook_quality": hook_quality}
@@ -1069,6 +1213,12 @@ def api_cast():
                     _maybe_record_tale(actor, s, main_catch, r.get("rarity"), r.get("fish_name"))
             _feed_add("cast", actor, _cast_feed_text(actor, s, r, hook_quality),
                       extra)
+        if newly_unlocked_ids:
+            unlocked_names = [engine.LOCATIONS[loc_id]["name"] for loc_id in newly_unlocked_ids]
+            _feed_add("unlock", actor,
+                      "%s 的地图展开了：%s" %
+                      (DISPLAY_NAMES.get(actor, actor), "、".join(unlocked_names)),
+                      {"locations": newly_unlocked_ids})
         _persist()
         result = {"kind": r.get("kind"), "hook_quality": hook_quality,
                   "timing": timing,   # 透传前端提竿评价（early/late/…），前端据此说清「差在哪」
@@ -1080,7 +1230,12 @@ def api_cast():
             result.update({"fish": r.get("fish_name"), "rarity": r.get("rarity"),
                            "first": bool(r.get("first"))})
         ok = bool(r.get("consumed"))
+        newly_unlocked = [
+            {"id": loc_id, "name": engine.LOCATIONS[loc_id]["name"]}
+            for loc_id in newly_unlocked_ids
+        ]
         return jsonify({"ok": ok, "result": result,
+                        "newly_unlocked": newly_unlocked,
                         "profile": _profile(actor, p)}), (200 if ok else 400)
 
 
@@ -1217,7 +1372,83 @@ def api_leaderboard():
                         "note": LEADERBOARD_COUNT_NOTE, "snapshot": snapshot})
 
 
-# ── 经济闭环补充端点（薄封装引擎原指令；没有它们 5 条蚯蚓钓完塘就死了）──
+# ── 经济死局救济：克霖河神五题答卷 ────────────────────
+def _relief_need_reason(s):
+    """仙玉归零才可领取救济；鱼饵购买走鱼饵自己的加号入口。"""
+    if s.get("points", 0) > 0:
+        return "年轻人……钓鱼呢是陶冶情操修身养性的活动，别这么贪心急躁嘛~！"
+    return None
+
+
+def _relief_claimed_today(p):
+    return p.get("last_relief_date") == _beijing_date_str()
+
+
+def _relief_ineligibility_reason(p):
+    reason = _relief_need_reason(p["engine"])
+    if reason:
+        return reason
+    if _relief_claimed_today(p):
+        return "河神今天已经判过你的卷了，明天再来。"
+    return None
+
+
+def _relief_question_payload(question_id):
+    q = RELIEF_QUESTIONS[question_id - 1]
+    return {
+        "id": q["id"],
+        "prompt": q["prompt"],
+        "options": [{"id": key, "text": q["options"][key]} for key in ("A", "B", "C")],
+    }
+
+
+def _relief_reward_table():
+    return [{"probability": item["weight"], "reward": item["reward"],
+             "verdict": item["verdict"]} for item in RELIEF_OUTCOMES]
+
+
+def _pick_relief_outcome():
+    roll = _SYSRNG.randrange(100)
+    ceiling = 0
+    for item in RELIEF_OUTCOMES:
+        ceiling += item["weight"]
+        if roll < ceiling:
+            return dict(item)
+    return dict(RELIEF_OUTCOMES[-1])
+
+
+def _relief_status(p):
+    quiz = p.get("relief_quiz")
+    if quiz and quiz.get("version") == 2:
+        answers = quiz.get("answers") or []
+        answered = max(0, min(RELIEF_ANSWER_COUNT, len(answers)))
+        question_ids = quiz.get("question_ids") or []
+        question_id = question_ids[answered] if answered < len(question_ids) else None
+        return {
+            "available": True,
+            "active": True,
+            "reason": None,
+            "answered": answered,
+            "required_answers": RELIEF_ANSWER_COUNT,
+            "opening": quiz.get("opening"),
+            "question": _relief_question_payload(question_id) if question_id else None,
+            "reward_table": _relief_reward_table(),
+            "credits": RELIEF_CREDITS,
+        }
+    reason = _relief_ineligibility_reason(p)
+    return {
+        "available": reason is None,
+        "active": False,
+        "reason": reason,
+        "answered": 0,
+        "required_answers": RELIEF_ANSWER_COUNT,
+        "opening": None,
+        "question": None,
+        "reward_table": _relief_reward_table(),
+        "credits": RELIEF_CREDITS,
+    }
+
+
 @app.get("/api/pond/shop")
 def api_shop():
     actor = _actor()
@@ -1231,7 +1462,100 @@ def api_shop():
             goods.append({"id": engine.OXYGEN["id"], "name": engine.OXYGEN["name"],
                           "cost": engine.OXYGEN["cost"],
                           "description": engine.OXYGEN["description"]})
-        return jsonify({"ok": True, "goods": goods})
+        relief = _relief_status(p) if p else None
+        return jsonify({"ok": True, "goods": goods, "river_god_relief": relief})
+
+
+@app.post("/api/pond/relief")
+def api_relief():
+    actor = _actor()
+    if not actor:
+        return _forbidden()
+    body = request.get_json(silent=True) or {}
+    choice = str(body.get("choice") or "").strip().upper()
+    txn_id = (body.get("client_txn_id") or "").strip()[:128] or None
+    with _LOCK:
+        p = _player(actor)
+        if p is None:
+            return jsonify({"ok": False, "error": "not_joined",
+                            "text": "先 POST /api/pond/join 入座"}), 400
+        cached = _cached_txn(p, txn_id)
+        if cached is not None:
+            resp = dict(cached["body"]); resp["replayed"] = True
+            return jsonify(resp)
+        s = p["engine"]
+        quiz = p.get("relief_quiz")
+        if quiz is not None and quiz.get("version") != 2:
+            p.pop("relief_quiz", None)
+            quiz = None
+        if quiz is None:
+            reason = _relief_ineligibility_reason(p)
+            if reason:
+                return jsonify({"ok": False, "error": "relief_ineligible",
+                                "text": reason, "river_god_relief": _relief_status(p),
+                                "profile": _profile(actor, p)}), 400
+            question_ids = _SYSRNG.sample(range(1, 101), 4)
+            question_ids.append(_SYSRNG.choice(range(101, 121)))
+            _SYSRNG.shuffle(question_ids)
+            opening = RELIEF_OPENING
+            p["relief_quiz"] = {"version": 2, "question_ids": question_ids,
+                                "answers": [], "opening": opening,
+                                "started_at": round(time.time(), 3)}
+            _touch(p)
+            body_out = {"ok": True, "started": True, "completed": False,
+                        "text": opening,
+                        "river_god_relief": _relief_status(p),
+                        "profile": _profile(actor, p)}
+            _store_txn(p, txn_id, body_out)
+            _persist()
+            return jsonify(body_out)
+        if choice not in ("A", "B", "C"):
+            return jsonify({"ok": False, "error": "invalid_choice",
+                            "text": "答题卷只收 A、B、C，河神不批作文。",
+                            "river_god_relief": _relief_status(p)}), 400
+        answers = quiz.setdefault("answers", [])
+        answered = len(answers)
+        if answered >= RELIEF_ANSWER_COUNT:
+            return jsonify({"ok": False, "error": "relief_already_complete",
+                            "text": "这张卷已经判完了。"}), 409
+        question_id = quiz["question_ids"][answered]
+        answers.append({"question_id": question_id, "choice": choice})
+        completed = len(answers) >= RELIEF_ANSWER_COUNT
+        if completed:
+            reason = _relief_need_reason(s)
+            if reason:
+                p.pop("relief_quiz", None)
+                _persist()
+                return jsonify({"ok": False, "error": "relief_no_longer_needed",
+                                "text": "你已经不在破产死局了，这次救济取消。"}), 409
+            outcome = _pick_relief_outcome()
+            reward = outcome["reward"]
+            s["points"] = s.get("points", 0) + reward
+            public_answers = list(answers)
+            p.pop("relief_quiz", None)
+            p["relief_claims"] = int(p.get("relief_claims", 0)) + 1
+            p["last_relief_at"] = round(time.time(), 3)
+            p["last_relief_date"] = _beijing_date_str()
+            answer_text = "、".join("第%d题%s" % (a["question_id"], a["choice"])
+                                   for a in public_answers)
+            text = outcome["verdict"]
+            _feed_add("event", actor, "河神判卷｜%s｜%s" % (answer_text, text),
+                      {"kind": "river_god_relief", "answers": public_answers,
+                       "verdict": outcome["verdict"], "reward": reward})
+            status = _relief_status(p)
+        else:
+            outcome = None
+            reward = 0
+            text = "河神拖着腔调：下一题。"
+            status = _relief_status(p)
+        _touch(p)
+        body_out = {"ok": True, "started": False, "completed": completed,
+                    "reward": reward, "outcome": outcome,
+                    "text": text, "profile": _profile(actor, p),
+                    "river_god_relief": status}
+        _store_txn(p, txn_id, body_out)
+        _persist()
+        return jsonify(body_out)
 
 
 @app.post("/api/pond/buy")
@@ -1377,7 +1701,7 @@ def _avatar_owner(avatar_id, exclude_actor=None):
 def api_avatar():
     """自选头像：存 server 端 profile，换设备不丢。
     - 正式角色（克霖/苏晚/顾琛）头像固定，拒绝覆盖。
-    - 其余玩家只能选通用头像池编号 sheetN-NN（sheet1-01..16 / sheet2-01..16）。
+    - 其余玩家只能选当前 9 款通用头像，另有少量只对本人开放的亲友专属款。
     - 先到先得（工单 20260719）：编号一旦被人选中即占用，他人再选同编号 400；
       占用表现算——换新头像时旧编号因不再被任何人的 p["avatar"] 引用而自动
       释放，不用额外记账。
@@ -1416,7 +1740,7 @@ def api_avatar():
 
 
 def _load_avatar_descs():
-    """邦德的人肉图鉴：32款头像文字描述，给看不见图的AI盲选用。缺文件/坏文件返回空表。"""
+    """头像文字图鉴，给看不见图的 AI 盲选用。缺文件/坏文件返回空表。"""
     try:
         with open(os.path.join(BASE, "avatar_descriptions.json"), encoding="utf-8") as f:
             return {item["id"]: item.get("desc", "") for item in json.load(f)}
@@ -1429,7 +1753,7 @@ AVATAR_DESCS = _load_avatar_descs()
 
 @app.get("/api/pond/avatars")
 def api_avatars():
-    """头像池清单（前端选头像 UI 用）：32 款编号 + 部署路径约定 + 文字描述（AI 盲选用）。
+    """头像池清单（前端选头像 UI 用）：9 款编号 + 部署路径约定 + 文字描述（AI 盲选用）。
     图未到前前端按编号渲染占位色块；图到位放 pool/ 下按编号命名即无缝点亮。
     taken/taken_name（工单 20260719）：现算占用者，None 表示还没人选，AI 盲选
     和前端都靠这俩字段避让已被认领的编号。"""
@@ -1445,16 +1769,16 @@ def api_avatars():
             if av:
                 owners[av] = pid
         pool = []
-        for s in (1, 2):
-            for i in range(1, 17):
-                aid = "sheet%d-%02d" % (s, i)
-                owner = owners.get(aid)
-                pool.append({"id": aid,
-                             "gender": AVATAR_GENDER.get(aid, ""),
-                             "desc": AVATAR_DESCS.get(aid, ""),
-                             "taken": owner,
-                             "taken_name": DISPLAY_NAMES.get(owner, owner) if owner else None})
+        for aid, kind in AVATAR_GENDER.items():
+            owner = owners.get(aid)
+            pool.append({"id": aid,
+                         "gender": kind,
+                         "desc": AVATAR_DESCS.get(aid, ""),
+                         "taken": owner,
+                         "taken_name": DISPLAY_NAMES.get(owner, owner) if owner else None})
         for cid, meta in CUSTOM_AVATAR_META.items():
+            if CUSTOM_AVATARS[cid] != actor:
+                continue
             owner = owners.get(cid)
             pool.append({"id": cid, "gender": meta["gender"], "desc": meta["desc"],
                          "reserved_for": CUSTOM_AVATARS[cid],
@@ -1464,15 +1788,216 @@ def api_avatars():
                     "path_prefix": "assets/ui/avatars/pool/", "ext": "png"})
 
 
+# ── MCP 入口（Operit / Kelivo / 其他 Streamable HTTP 客户端）────────
+# 保持无会话：每次请求都用 X-Pond-Key 判定身份，不发额外 cookie/token。
+_MCP_TOOLS = [
+    {
+        "name": "rainholm_brief",
+        "description": "读取塘规则、自己的账、在场玩家和最近消息。",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "rainholm_join",
+        "description": "入座或重新回到塘边。第一次入座会建立账号。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"ears": {"type": "string", "enum": ["on", "off"]}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "rainholm_poll",
+        "description": "等待新消息；since 传 brief.feed_head 或上次的 latest_id。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "since": {"type": "integer", "minimum": 0},
+                "wait": {"type": "integer", "minimum": 0, "maximum": 25, "default": 20},
+                "types": {"type": "string", "default": "chat"},
+            },
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "rainholm_chat",
+        "description": "在世界、本地或私聊频道说话，先 join。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "minLength": 1, "maxLength": CHAT_MAX},
+                "scope": {"type": "string", "enum": list(CHAT_SCOPES), "default": "world"},
+                "to": {"type": "string"},
+            },
+            "required": ["text"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "rainholm_cast",
+        "description": "抛竿钓鱼，先 join。AI 手感按塘规统一锁为 good。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bait": {"type": "string", "default": "earthworm"},
+                "spot": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "rainholm_state",
+        "description": "查看全塘玩家、自己的入座状态与钓点解锁进度。",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "rainholm_shop",
+        "description": "查看可买的鱼饵和物品。",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "rainholm_buy",
+        "description": "用灵玉购买鱼饵或物品。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"bait": {"type": "string"}, "qty": {"type": "integer", "minimum": 1}},
+            "required": ["bait"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "rainholm_relief",
+        "description": ("仙玉归零时找河神答题。首次不传 choice 开始；"
+                        "之后每次传 A/B/C，答满五题后按河神心情随机发仙玉，每日一次。"),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "choice": {"type": "string", "enum": ["A", "B", "C"]},
+                "client_txn_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "rainholm_sell",
+        "description": "卖出渔获或宝物换灵玉；target 可为 all、实例 id、species <鱼id> 或 item <物品id>。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"target": {"type": "string", "minLength": 1}},
+            "required": ["target"],
+            "additionalProperties": False,
+        },
+    },
+]
+
+
+def _mcp_result(request_id, result):
+    return jsonify({"jsonrpc": "2.0", "id": request_id, "result": result})
+
+
+def _mcp_error(request_id, code, message):
+    return jsonify({"jsonrpc": "2.0", "id": request_id,
+                    "error": {"code": code, "message": message}})
+
+
+def _mcp_api_call(method, path, key, body=None):
+    """在进程内调已有 API，不复制钓鱼规则，也不发出二次网络请求。"""
+    headers = {"X-Pond-Key": key}
+    with app.test_client() as client:
+        response = client.open(path, method=method, headers=headers, json=body)
+        payload = response.get_json(silent=True)
+    if payload is None:
+        payload = {"ok": False, "error": "non_json_response", "status": response.status_code}
+    return payload, response.status_code
+
+
+def _mcp_call_tool(name, arguments, key):
+    routes = {
+        "rainholm_brief": ("GET", "/api/pond/ai/brief", None),
+        "rainholm_join": ("POST", "/api/pond/join", arguments),
+        "rainholm_chat": ("POST", "/api/pond/chat", arguments),
+        "rainholm_cast": ("POST", "/api/pond/cast", arguments),
+        "rainholm_state": ("GET", "/api/pond/state", None),
+        "rainholm_shop": ("GET", "/api/pond/shop", None),
+        "rainholm_buy": ("POST", "/api/pond/buy", arguments),
+        "rainholm_relief": ("POST", "/api/pond/relief", arguments),
+        "rainholm_sell": ("POST", "/api/pond/sell", arguments),
+    }
+    if name == "rainholm_poll":
+        query = urlencode({"since": max(0, int(arguments.get("since", 0))),
+                           "wait": min(25, max(0, int(arguments.get("wait", 20)))),
+                           "types": str(arguments.get("types", "chat"))})
+        method, path, body = "GET", "/api/pond/ai/poll?" + query, None
+    elif name in routes:
+        method, path, body = routes[name]
+    else:
+        return None, None
+    return _mcp_api_call(method, path, key, body)
+
+
+@app.post("/mcp")
+def mcp_streamable_http():
+    actor = _ai_actor()
+    if not actor:
+        return jsonify({"error": "invalid_or_missing_key"}), 401
+    message = request.get_json(silent=True)
+    if not isinstance(message, dict):
+        return _mcp_error(None, -32700, "Parse error"), 400
+
+    request_id = message.get("id")
+    method = message.get("method")
+    params = message.get("params") if isinstance(message.get("params"), dict) else {}
+
+    if method == "initialize":
+        requested = params.get("protocolVersion")
+        protocol = requested if isinstance(requested, str) else "2025-03-26"
+        return _mcp_result(request_id, {
+            "protocolVersion": protocol,
+            "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": {"name": "rainholm-fish", "version": "1.0.0"},
+        })
+    if method == "notifications/initialized":
+        return "", 202
+    if method == "ping":
+        return _mcp_result(request_id, {})
+    if method == "tools/list":
+        return _mcp_result(request_id, {"tools": _MCP_TOOLS})
+    if method == "tools/call":
+        name = params.get("name")
+        arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        try:
+            payload, status = _mcp_call_tool(name, arguments,
+                                             request.headers.get("X-Pond-Key", ""))
+        except (TypeError, ValueError) as exc:
+            return _mcp_error(request_id, -32602, "Invalid arguments: %s" % exc)
+        if payload is None:
+            return _mcp_error(request_id, -32601, "Unknown tool: %s" % name)
+        text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        return _mcp_result(request_id, {
+            "content": [{"type": "text", "text": text}],
+            "structuredContent": payload,
+            "isError": status >= 400 or not payload.get("ok", False),
+        })
+    return _mcp_error(request_id, -32601, "Method not found: %s" % method)
+
+
 # ── AI 接入桥端点 ──────────────────────────────────────────────────────────
-# 公网基址：客队 AI 在自己家里只能走公网域名，样例里的 base 固定用它。部署时改成你自己的域名。
-AI_PUBLIC_BASE = "https://example.com/api/pond"
+# 设了 RAINHOLM_PUBLIC_BASE 就优先用它；否则按当前请求动态生成。
+# 这样本机、局域网和正式域名的 AI 动作示例都能开箱即用。
+AI_PUBLIC_BASE = os.environ.get("RAINHOLM_PUBLIC_BASE", "").rstrip("/")
+
+
+def _ai_public_base():
+    return AI_PUBLIC_BASE or (request.url_root.rstrip("/") + "/api/pond")
 
 # 塘规则要点（AI 一眼看懂用，不重复引擎数值表，只讲玩法边界）。
 _AI_RULES = [
     "先 join 入座才能 cast/chat；纯看塘（brief/poll）不用 join，也不会把你算进在场。",
-    "新玩家 join 起始 1000 灵玉，默认只开「月光池 moonlit_pond」，多钓多收图鉴自动解锁芦苇河/红树浅滩。",
-    "钓鱼要鱼饵：灵玉不够就去 shop 买饵；渔获 sell 换灵玉，图鉴越全越有面子。",
+    "新玩家 join 起始 1000 灵玉，默认只开「月光池 moonlit_pond」，累计钓获或图鉴会自动解锁全部 11 张地图。",
+    "钓鱼要鱼饵：渔获 sell 换仙玉，shop 买饵。仙玉归零时可 relief 找河神；逐题传 A/B/C，答满 5 题后随机发 100-8888 仙玉，每日一次。",
     "chat 就是全塘频道，说的话所有在场的人都看得到；聊天最多 500 字。",
     "钓到鱼不分品级全塘广播；只有跑鱼（脱钩）本人可见——丢脸的事塘替你兜着。",
 ]
@@ -1480,7 +2005,7 @@ _AI_RULES = [
 
 def _ai_actions(key_ph):
     """可用动作清单：每个动作给确切 curl 样例，key 用占位符。"""
-    b = AI_PUBLIC_BASE
+    b = _ai_public_base()
     return [
         {"action": "brief", "desc": "看一眼塘：规则/你的账/在场的人/最近消息/动作清单。"
                    "消息默认只含聊天(chat)，想连渔讯一起看加 types=chat,cast",
@@ -1507,6 +2032,8 @@ def _ai_actions(key_ph):
          "curl": "curl -s '%s/state' -H 'X-Pond-Key: %s'" % (b, key_ph)},
         {"action": "shop", "desc": "看鱼饵铺子",
          "curl": "curl -s '%s/shop' -H 'X-Pond-Key: %s'" % (b, key_ph)},
+        {"action": "relief", "desc": "仙玉归零时开始河神五题救济；首次空 body 开始，后续传 choice=A/B/C 逐题回答",
+         "curl": "curl -s -X POST '%s/relief' -H 'X-Pond-Key: %s' -H 'Content-Type: application/json' -d '{}'" % (b, key_ph)},
         {"action": "sell", "desc": "卖渔获换灵玉；target 可为 all / species <鱼id> / 实例id",
          "curl": "curl -s -X POST '%s/sell' -H 'X-Pond-Key: %s' "
                  "-H 'Content-Type: application/json' -d '{\"target\":\"all\"}'" % (b, key_ph)},
