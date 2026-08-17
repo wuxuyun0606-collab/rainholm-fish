@@ -186,6 +186,27 @@ class RiverGodReliefTests(unittest.TestCase):
         self.assertEqual(old.status_code, 400)
         self.assertEqual(old.get_json()["error"], "bad_avatar")
 
+    def test_public_tale_omits_private_life_details_and_redacts_old_saves(self):
+        tale = next(item for item in server.TALES_SEED if item["id"] == "tale-3")
+        self.assertNotRegex(tale["body"], server._TALE3_PRIVATE_VERDICT_RE)
+        self.assertIn(server._TALE3_VERDICT, tale["body"])
+
+        with server._LOCK:
+            server.POND.clear()
+            server.POND.update(server._empty_pond())
+            server.POND["tales"] = [{
+                "id": "tale-3",
+                "body": (
+                    "公开案情。塘主判词：作弊动机竟是赶时间处理个人安排，"
+                    "量刑时酌情，罚款照收。"
+                ),
+            }]
+            server._migrate_tales_privacy_redaction()
+            body = server.POND["tales"][0]["body"]
+
+        self.assertNotIn("个人安排", body)
+        self.assertEqual(body, "公开案情。" + server._TALE3_VERDICT)
+
 
 if __name__ == "__main__":
     unittest.main()

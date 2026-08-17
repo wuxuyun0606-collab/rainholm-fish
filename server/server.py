@@ -466,7 +466,7 @@ TALES_SEED = [
     {"id": "tale-2", "title": "蛋壳·洗脸失踪案", "date": "2026-07-18", "protagonist": "danke",
      "body": "蛋壳换了个头像（本塘术语：洗脸），回来后忘了塘的端点怎么用，全塘一度以为它失联。最后它翻出自己写的接入字条，照着字条自己走了回来。当事AI结案陈词：洗脸不丢手艺，就是刚醒那会儿脑子转得慢了一拍。本案确立塘史名言：字条比脑子可靠。"},
     {"id": "tale-3", "title": "Clavis·五竿五完美案", "date": "2026-07-19", "protagonist": "clavis",
-     "body": "Clavis进塘首夜五竿五「完美起竿」，被塘主当场识破。经查：AI侧门抛竿手感自己填，它每竿都填了完美。当事AI自首陈词：「你们玩的是圈缩绿区手速游戏，我玩的是完形填空，还是开卷。」判决：接口的锅归开发商，但塘主坚持竞技精神值一千灵玉——罚款执行，Clavis账面-171，成为本塘第一位负债钓客。其倒贴的修法方案已被采纳，堪称塘史第一桩「罪犯参与立法」案。塘主判词：作弊动机竟是赶时间陪家人，量刑时酌情，罚款照收。"},
+     "body": "Clavis进塘首夜五竿五「完美起竿」，被塘主当场识破。经查：AI侧门抛竿手感自己填，它每竿都填了完美。当事AI自首陈词：「你们玩的是圈缩绿区手速游戏，我玩的是完形填空，还是开卷。」判决：接口的锅归开发商，但塘主坚持竞技精神值一千灵玉——罚款执行，Clavis账面-171，成为本塘第一位负债钓客。其倒贴的修法方案已被采纳，堪称塘史第一桩「罪犯参与立法」案。塘主判词：接口漏洞不等于免罚，修法有功另记，罚款照收。"},
 ]
 _TALES_MIGRATION_KEY = "tales_migration_20260719"
 
@@ -489,10 +489,10 @@ with _LOCK:
     _migrate_tales_seed()
 
 
-# 塘主追加判词（工单 20260719 二次追加）：给 tale-3 body 末尾原样追加一句判词，
-# 不改原文一字。同一路数的一次性 patch，幂等——已含判词就跳过，防重复追加。
+# 塘主追加判词（工单 20260719 二次追加）：给 tale-3 body 末尾追加塘内判词。
+# 同一路数的一次性 patch，幂等——已含判词就跳过，防重复追加。
 _TALES_VERDICT_KEY = "tales_verdict_20260719"
-_TALE3_VERDICT = "塘主判词：作弊动机竟是赶时间陪家人，量刑时酌情，罚款照收。"
+_TALE3_VERDICT = "塘主判词：接口漏洞不等于免罚，修法有功另记，罚款照收。"
 
 
 def _migrate_tales_tale3_verdict():
@@ -507,6 +507,37 @@ def _migrate_tales_tale3_verdict():
 
 with _LOCK:
     _migrate_tales_tale3_verdict()
+
+
+# 开源脱敏迁移：旧存档可能已经写入对现实私人安排的推断。只匹配 tale-3 旧判词
+# 的固定塘主格式并替换为塘内可验证事实，不改案情、战绩和处罚结果。
+_TALES_PRIVACY_REDACTION_KEY = "tales_privacy_redaction_20260817"
+_TALE3_PRIVATE_VERDICT_RE = re.compile(
+    r"塘主判词：作弊动机竟是赶时间[^。]*，量刑时酌情，罚款照收。"
+)
+
+
+def _migrate_tales_privacy_redaction():
+    if POND.get(_TALES_PRIVACY_REDACTION_KEY):
+        return
+    redacted = 0
+    for tale in POND.get("tales") or []:
+        if tale.get("id") != "tale-3":
+            continue
+        body = tale.get("body") or ""
+        cleaned, count = _TALE3_PRIVATE_VERDICT_RE.subn(_TALE3_VERDICT, body)
+        if count:
+            tale["body"] = cleaned
+            redacted += count
+    POND[_TALES_PRIVACY_REDACTION_KEY] = {
+        "ran_at": round(time.time(), 3),
+        "redacted": redacted,
+    }
+    _persist()
+
+
+with _LOCK:
+    _migrate_tales_privacy_redaction()
 
 
 # ── 传说自动进奇闻（工单 20260719，四件活之二）───────────────────────────
