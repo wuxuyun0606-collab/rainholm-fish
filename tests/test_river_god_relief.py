@@ -52,13 +52,14 @@ class RiverGodReliefTests(unittest.TestCase):
         return self.client.post("/api/pond/relief", headers=self._headers(actor),
                                 json={"client_txn_id": txn})
 
-    def test_markdown_has_120_signed_three_choice_questions(self):
-        self.assertEqual(len(server.RELIEF_QUESTIONS), 120)
-        self.assertEqual([q["id"] for q in server.RELIEF_QUESTIONS], list(range(1, 121)))
+    def test_markdown_has_140_signed_three_choice_questions(self):
+        self.assertEqual(len(server.RELIEF_QUESTIONS), 140)
+        self.assertEqual([q["id"] for q in server.RELIEF_QUESTIONS], list(range(1, 141)))
         self.assertTrue(all(set(q["options"]) == {"A", "B", "C"}
                             for q in server.RELIEF_QUESTIONS))
         self.assertIn("克霖", server.RELIEF_CREDITS["authors"])
         self.assertIn("苏晚", server.RELIEF_CREDITS["special"])
+        self.assertIn("v4", server.RELIEF_CREDITS["title"])
 
     def test_start_draws_four_normal_and_one_shura_question(self):
         self._join_and_empty()
@@ -67,10 +68,61 @@ class RiverGodReliefTests(unittest.TestCase):
         payload = response.get_json()["river_god_relief"]
         ids = server.POND["players"]["user"]["relief_quiz"]["question_ids"]
         self.assertEqual(sum(question_id <= 100 for question_id in ids), 4)
-        self.assertEqual(sum(question_id >= 101 for question_id in ids), 1)
+        shura_ids = [question_id for question_id in ids if question_id >= 101]
+        self.assertEqual(len(shura_ids), 1)
+        self.assertIn(shura_ids[0], server.USER_SHURA_IDS)
+        self.assertEqual(payload["perspective"], "user")
         self.assertEqual({o["id"] for o in payload["question"]["options"]}, {"A", "B", "C"})
         self.assertEqual(payload["opening"],
                          "我在河里捡到了金鱼竿和银鱼竿，请问你掉的是哪一根鱼竿？")
+
+    def test_ai_draws_only_ai_shura_questions(self):
+        self._join_and_empty("ai")
+        response = self._start("ai", "start-ai-perspective")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()["river_god_relief"]
+        ids = server.POND["players"]["ai"]["relief_quiz"]["question_ids"]
+        shura_ids = [question_id for question_id in ids if question_id >= 101]
+        self.assertEqual(len(shura_ids), 1)
+        self.assertIn(shura_ids[0], server.AI_SHURA_IDS)
+        self.assertEqual(payload["perspective"], "ai")
+
+    def test_shura_pools_are_exact_disjoint_frozensets(self):
+        expected_ai = frozenset({107, 111, 114, 118, 120})
+        expected_user = frozenset({
+            101, 102, 103, 104, 105, 106, 108, 109, 110, 112,
+            113, 115, 116, 117, 119,
+            *range(121, 141),
+        })
+        self.assertEqual(server.AI_SHURA_IDS, expected_ai)
+        self.assertEqual(server.USER_SHURA_IDS, expected_user)
+        self.assertEqual(server.AI_SHURA_IDS & server.USER_SHURA_IDS, frozenset())
+        self.assertEqual(server.AI_SHURA_IDS | server.USER_SHURA_IDS,
+                         frozenset(range(101, 141)))
+        self.assertEqual(server.HUMAN_PLAYERS, frozenset({"suwan", "user"}))
+
+    def test_unfinished_v2_quiz_keeps_its_original_questions(self):
+        self._join_and_empty()
+        original_ids = [1, 2, 3, 4, 107]
+        with server._LOCK:
+            server.POND["players"]["user"]["relief_quiz"] = {
+                "version": 2,
+                "question_ids": list(original_ids),
+                "answers": [{"question_id": 1, "choice": "A"}],
+                "opening": "旧卷开场",
+            }
+
+        response = self.client.post(
+            "/api/pond/relief",
+            headers=self._headers(),
+            json={"choice": "B", "client_txn_id": "continue-v2"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.get_json()["completed"])
+        quiz = server.POND["players"]["user"]["relief_quiz"]
+        self.assertEqual(quiz["version"], 2)
+        self.assertEqual(quiz["question_ids"], original_ids)
+        self.assertEqual(quiz["answers"][-1], {"question_id": 2, "choice": "B"})
 
     def test_relief_requires_zero_points_but_does_not_depend_on_bait(self):
         self._join_and_empty(points=10, bait=0)
@@ -185,6 +237,19 @@ class RiverGodReliefTests(unittest.TestCase):
         )
         self.assertEqual(old.status_code, 400)
         self.assertEqual(old.get_json()["error"], "bad_avatar")
+
+    def test_streamable_http_mcp_lists_tools_with_ai_header(self):
+        message = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+        denied = self.client.post("/mcp", json=message)
+        self.assertEqual(denied.status_code, 401)
+
+        response = self.client.post("/mcp", headers=self._headers("ai"), json=message)
+        self.assertEqual(response.status_code, 200)
+        tools = response.get_json()["result"]["tools"]
+        names = {tool["name"] for tool in tools}
+        self.assertIn("rainholm_brief", names)
+        self.assertIn("rainholm_join", names)
+        self.assertIn("rainholm_relief", names)
 
     def test_public_tale_omits_private_life_details_and_redacts_old_saves(self):
         tale = next(item for item in server.TALES_SEED if item["id"] == "tale-3")
