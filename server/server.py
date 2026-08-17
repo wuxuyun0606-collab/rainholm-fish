@@ -112,8 +112,18 @@ CHAT_SCOPES = ("world", "local", "dm")  # 7/27 聊天频道隔离：世界/本�
 STARTER_POINTS = 1000   # 新玩家 join 起始点数（服务层覆盖引擎默认 200，只在首次 join 发一次）
 TXN_CACHE_CAP = 200     # 每个玩家最近 N 条 buy/sell 流水号缓存上限（持久化，防重复点击/断线重试）
 RELIEF_ANSWER_COUNT = 5
+RELIEF_QUIZ_VERSION = 3
+RELIEF_COMPATIBLE_QUIZ_VERSIONS = frozenset({2, 3})
 RELIEF_QUIZ_PATH = os.path.join(BASE, "bailout_quiz.md")
 RELIEF_OPENING = "我在河里捡到了金鱼竿和银鱼竿，请问你掉的是哪一根鱼竿？"
+HUMAN_PLAYERS = frozenset({"suwan", "user"})
+AI_SHURA_IDS = frozenset({107, 111, 114, 118, 120})
+USER_SHURA_IDS = frozenset({
+    101, 102, 103, 104, 105, 106, 108, 109, 110, 112,
+    113, 115, 116, 117, 119,
+    121, 122, 123, 124, 125, 126, 127, 128, 129, 130,
+    131, 132, 133, 134, 135, 136, 137, 138, 139, 140,
+})
 RELIEF_OUTCOMES = (
     {"weight": 5, "reward": 8888,
      "verdict": "你把河神逗得当场破功。河神笑着把压箱底的8888仙玉推给你。"},
@@ -129,14 +139,14 @@ RELIEF_OUTCOMES = (
      "verdict": "河神看在你已经破产的份上，从袖子里摸了半天，勉强凑出100仙玉。"},
 )
 RELIEF_CREDITS = {
-    "title": "寻霖塘 · 破产救济考场题库 v3",
+    "title": "寻霖塘 · 破产救济考场题库 v4",
     "authors": "DeepSeek-V4-Pro 主笔，克霖质检合卷",
     "special": "苏晚第1、2题；克霖第43、84题",
 }
 
 
 def _load_relief_questions():
-    """从带完整署名的 Markdown 原卷读取 120 道三选题，不复制出第二份题库。"""
+    """从带完整署名的 Markdown 原卷读取 140 道三选题，不复制出第二份题库。"""
     questions = []
     current = None
     with open(RELIEF_QUIZ_PATH, "r", encoding="utf-8") as f:
@@ -154,9 +164,9 @@ def _load_relief_questions():
                 current["options"][option_match.group(1)] = option_match.group(2)
         if current is not None:
             questions.append(current)
-    expected_ids = list(range(1, 121))
+    expected_ids = list(range(1, 141))
     if [q["id"] for q in questions] != expected_ids:
-        raise RuntimeError("bailout_quiz.md 必须恰好包含连续编号 1-120")
+        raise RuntimeError("bailout_quiz.md 必须恰好包含连续编号 1-140")
     if any(set(q["options"]) != {"A", "B", "C"} for q in questions):
         raise RuntimeError("bailout_quiz.md 每题必须恰好包含 A/B/C 三个选项")
     return tuple(questions)
@@ -1402,6 +1412,15 @@ def _relief_question_payload(question_id):
     }
 
 
+def _relief_perspective(actor):
+    """公开 User 与塘主人类走 User 卷；其余接入身份按 AI 卷处理。"""
+    return "user" if actor in HUMAN_PLAYERS else "ai"
+
+
+def _relief_shura_ids(actor):
+    return USER_SHURA_IDS if _relief_perspective(actor) == "user" else AI_SHURA_IDS
+
+
 def _relief_reward_table():
     return [{"probability": item["weight"], "reward": item["reward"],
              "verdict": item["verdict"]} for item in RELIEF_OUTCOMES]
@@ -1419,7 +1438,7 @@ def _pick_relief_outcome():
 
 def _relief_status(p):
     quiz = p.get("relief_quiz")
-    if quiz and quiz.get("version") == 2:
+    if quiz and quiz.get("version") in RELIEF_COMPATIBLE_QUIZ_VERSIONS:
         answers = quiz.get("answers") or []
         answered = max(0, min(RELIEF_ANSWER_COUNT, len(answers)))
         question_ids = quiz.get("question_ids") or []
@@ -1431,6 +1450,7 @@ def _relief_status(p):
             "answered": answered,
             "required_answers": RELIEF_ANSWER_COUNT,
             "opening": quiz.get("opening"),
+            "perspective": quiz.get("perspective"),
             "question": _relief_question_payload(question_id) if question_id else None,
             "reward_table": _relief_reward_table(),
             "credits": RELIEF_CREDITS,
@@ -1443,6 +1463,7 @@ def _relief_status(p):
         "answered": 0,
         "required_answers": RELIEF_ANSWER_COUNT,
         "opening": None,
+        "perspective": None,
         "question": None,
         "reward_table": _relief_reward_table(),
         "credits": RELIEF_CREDITS,
@@ -1485,7 +1506,7 @@ def api_relief():
             return jsonify(resp)
         s = p["engine"]
         quiz = p.get("relief_quiz")
-        if quiz is not None and quiz.get("version") != 2:
+        if quiz is not None and quiz.get("version") not in RELIEF_COMPATIBLE_QUIZ_VERSIONS:
             p.pop("relief_quiz", None)
             quiz = None
         if quiz is None:
@@ -1495,10 +1516,13 @@ def api_relief():
                                 "text": reason, "river_god_relief": _relief_status(p),
                                 "profile": _profile(actor, p)}), 400
             question_ids = _SYSRNG.sample(range(1, 101), 4)
-            question_ids.append(_SYSRNG.choice(range(101, 121)))
+            perspective = _relief_perspective(actor)
+            question_ids.append(_SYSRNG.choice(tuple(sorted(_relief_shura_ids(actor)))))
             _SYSRNG.shuffle(question_ids)
             opening = RELIEF_OPENING
-            p["relief_quiz"] = {"version": 2, "question_ids": question_ids,
+            p["relief_quiz"] = {"version": RELIEF_QUIZ_VERSION,
+                                "perspective": perspective,
+                                "question_ids": question_ids,
                                 "answers": [], "opening": opening,
                                 "started_at": round(time.time(), 3)}
             _touch(p)

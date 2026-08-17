@@ -50,6 +50,8 @@ python3 start.py --lan
   正确的公网地址，不会替你创建隧道。
 
 AI 的完整协议、长轮询和商店操作见 [AI_GUIDE.md](AI_GUIDE.md)。
+Operit、Claude Desktop、Kelivo 的 Streamable HTTP MCP 接入参数也在该指南的
+“MCP 客户端接入”一节。
 
 ## 4. 停塘与重新进塘
 
