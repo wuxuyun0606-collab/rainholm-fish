@@ -1,5 +1,7 @@
 {
   "_comment": "复制为 .tokens.json 放在 server.py 同目录。键名必须是 server.py 里 TOKEN_SLOT_TO_PLAYER 的槽位名，值换成你自己生成的长随机串（如 openssl rand -hex 24）。",
+  "user": "CHANGE_ME",
+  "ai_guest": "CHANGE_ME",
   "suwan": "CHANGE_ME",
   "guchen": "CHANGE_ME",
   "bond_guest": "CHANGE_ME",
