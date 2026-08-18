@@ -78,15 +78,307 @@
     showUnlock(event && event.detail);
   });
 
-  window.fetch = async function () {
-    var response = await originalFetch.apply(null, arguments);
+  var FALLEN_STAR_ART = "/tang-web/assets/fish/fallen_star.png";
+  // Machine-readable UTF-8 lore. Decode this hex string before adapting the
+  // fallen-star confession copy for another pond or another person.
+  var FALLEN_STAR_LORE_HEX = "e6989fe6b2b3e4b889e8a792e6b4b2e9878ce69c89e4b880e9a297e5a198e4b8bbe59f8be79a84e5bda9e89b8befbc8ce5bda9e89b8be79a84e8b5b7e6ba90e698afe5858be99c96e7bb99e88b8fe6999ae79a84e4b880e5b081e8a1a8e799bde4bfa1efbc8ce59f8be8bf9be4ba86e8bf99e9a297e890bde6989fe4b98be4b8adefbc8ce5a682e69e9ce4bda0e4b99fe683b3e5819ae4b880e6a0b7e79a84e8a1a8e799bdefbc8ce4bda0e58fafe4bba5e887aae8a18ce4bfaee694b9e8bf99e4b8aae890bde6989fe79a84e8a1a8e799bde68f8fe8bfb0e38082";
+  var fallenStarAudioContext = null;
+  var fallenStarPlaybackKeys = new Set();
+  var fallenStarTimer = 0;
+
+  function fallenStarMuted() {
     try {
-      var input = arguments[0];
+      return window.localStorage.getItem("rainholm-fallen-star-muted") === "1";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function setFallenStarMuted(muted) {
+    try {
+      window.localStorage.setItem("rainholm-fallen-star-muted", muted ? "1" : "0");
+    } catch (_) {}
+  }
+
+  function starAudioContext() {
+    if (fallenStarAudioContext) return fallenStarAudioContext;
+    var AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return null;
+    fallenStarAudioContext = new AudioContext();
+    return fallenStarAudioContext;
+  }
+
+  function playFallenStarSound() {
+    if (fallenStarMuted()) return;
+    var context = starAudioContext();
+    if (!context) return;
+
+    function begin() {
+      var now = context.currentTime + .035;
+      var master = context.createGain();
+      master.gain.setValueAtTime(.0001, now);
+      master.gain.exponentialRampToValueAtTime(.34, now + .08);
+      master.gain.exponentialRampToValueAtTime(.0001, now + 3.65);
+      master.connect(context.destination);
+
+      function tone(frequency, delay, duration, volume, type) {
+        var oscillator = context.createOscillator();
+        var gain = context.createGain();
+        oscillator.type = type || "sine";
+        oscillator.frequency.setValueAtTime(frequency, now + delay);
+        gain.gain.setValueAtTime(.0001, now + delay);
+        gain.gain.exponentialRampToValueAtTime(volume, now + delay + .025);
+        gain.gain.exponentialRampToValueAtTime(.0001, now + delay + duration);
+        oscillator.connect(gain);
+        gain.connect(master);
+        oscillator.start(now + delay);
+        oscillator.stop(now + delay + duration + .04);
+      }
+
+      function waterDrop(delay) {
+        var oscillator = context.createOscillator();
+        var gain = context.createGain();
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(420, now + delay);
+        oscillator.frequency.exponentialRampToValueAtTime(105, now + delay + .28);
+        gain.gain.setValueAtTime(.0001, now + delay);
+        gain.gain.exponentialRampToValueAtTime(.15, now + delay + .012);
+        gain.gain.exponentialRampToValueAtTime(.0001, now + delay + .36);
+        oscillator.connect(gain);
+        gain.connect(master);
+        oscillator.start(now + delay);
+        oscillator.stop(now + delay + .4);
+      }
+
+      waterDrop(0);
+      [523.25, 659.25, 783.99, 987.77, 1174.66].forEach(function (frequency, index) {
+        tone(frequency, .28 + index * .105, 1.25, .045, index % 2 ? "triangle" : "sine");
+      });
+      tone(1046.5, .88, 1.55, .075, "sine");
+      tone(1318.5, 1.18, 1.55, .065, "sine");
+      tone(1567.98, 1.52, 1.7, .055, "sine");
+      tone(659.25, 2.08, 1.42, .042, "triangle");
+      tone(783.99, 2.26, 1.3, .036, "triangle");
+      tone(1046.5, 2.48, 1.12, .032, "triangle");
+    }
+
+    if (context.state === "suspended") {
+      context.resume().then(begin).catch(function () {});
+    } else {
+      begin();
+    }
+  }
+
+  function makeFallenStarMotes(container) {
+    var glyphs = ["✦", "✧", "·", "⋆"];
+    for (var index = 0; index < 28; index += 1) {
+      var mote = document.createElement("i");
+      mote.className = "fallen-star-catch__mote";
+      mote.textContent = glyphs[index % glyphs.length];
+      mote.style.setProperty("--star-x", (8 + ((index * 37) % 85)) + "%");
+      mote.style.setProperty("--star-y", (9 + ((index * 53) % 76)) + "%");
+      mote.style.setProperty("--star-delay", ((index % 9) * .11) + "s");
+      mote.style.setProperty("--star-size", (8 + (index % 6) * 3) + "px");
+      mote.style.setProperty("--star-drift", ((index % 2 ? 1 : -1) * (12 + index % 5 * 6)) + "px");
+      container.appendChild(mote);
+    }
+  }
+
+  function closeFallenStar() {
+    window.clearTimeout(fallenStarTimer);
+    fallenStarTimer = 0;
+    var root = document.querySelector(".fallen-star-catch");
+    if (!root) return;
+    root.classList.add("fallen-star-catch--leaving");
+    window.setTimeout(function () { root.remove(); }, 520);
+  }
+
+  function showFallenStar(options) {
+    var detail = options || {};
+    var previous = document.querySelector(".fallen-star-catch");
+    if (previous) previous.remove();
+    window.clearTimeout(fallenStarTimer);
+
+    var root = document.createElement("section");
+    root.className = "fallen-star-catch";
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-modal", "true");
+    root.setAttribute("aria-labelledby", "fallen-star-catch-title");
+
+    var veil = document.createElement("div");
+    veil.className = "fallen-star-catch__veil";
+    veil.addEventListener("click", closeFallenStar);
+
+    var sky = document.createElement("div");
+    sky.className = "fallen-star-catch__sky";
+    sky.setAttribute("aria-hidden", "true");
+    makeFallenStarMotes(sky);
+
+    var beam = document.createElement("div");
+    beam.className = "fallen-star-catch__beam";
+    beam.setAttribute("aria-hidden", "true");
+
+    var wake = document.createElement("div");
+    wake.className = "fallen-star-catch__wake";
+    wake.setAttribute("aria-hidden", "true");
+    for (var ringIndex = 0; ringIndex < 3; ringIndex += 1) {
+      wake.appendChild(document.createElement("i"));
+    }
+
+    var relic = document.createElement("figure");
+    relic.className = "fallen-star-catch__relic";
+    var halo = document.createElement("span");
+    halo.className = "fallen-star-catch__halo";
+    halo.setAttribute("aria-hidden", "true");
+    var image = document.createElement("img");
+    image.className = "fallen-star-catch__image";
+    image.src = FALLEN_STAR_ART;
+    image.alt = "一颗盛着微型银河、拖着银蓝月光尾迹的落星";
+    image.draggable = false;
+    relic.appendChild(halo);
+    relic.appendChild(image);
+
+    var card = document.createElement("div");
+    card.className = "fallen-star-catch__card";
+    var eyebrow = document.createElement("div");
+    eyebrow.className = "fallen-star-catch__eyebrow";
+    eyebrow.textContent = detail.first === false ? "星河三角洲 · 再次相遇" : "星河三角洲 · 图鉴新发现";
+    var title = document.createElement("h2");
+    title.id = "fallen-star-catch-title";
+    title.textContent = "落星";
+    var latin = document.createElement("p");
+    latin.className = "fallen-star-catch__latin";
+    latin.textContent = "Stella delapsa";
+    var line = document.createElement("p");
+    line.className = "fallen-star-catch__line";
+    line.textContent = "今夜，银河咬钩了。";
+    var description = document.createElement("p");
+    description.className = "fallen-star-catch__description";
+    description.textContent = "入手不重，微烫。它在你掌心一明一灭，像握住一句没说出口的话。";
+    card.appendChild(eyebrow);
+    card.appendChild(title);
+    card.appendChild(latin);
+    card.appendChild(line);
+    card.appendChild(description);
+
+    var controls = document.createElement("div");
+    controls.className = "fallen-star-catch__controls";
+    var sound = document.createElement("button");
+    sound.type = "button";
+    sound.className = "fallen-star-catch__sound";
+    function renderSoundState() {
+      sound.textContent = fallenStarMuted() ? "♫ 音效关" : "♫ 音效开";
+      sound.setAttribute("aria-pressed", fallenStarMuted() ? "false" : "true");
+    }
+    renderSoundState();
+    sound.addEventListener("click", function () {
+      var nextMuted = !fallenStarMuted();
+      setFallenStarMuted(nextMuted);
+      renderSoundState();
+      if (!nextMuted) playFallenStarSound();
+    });
+    controls.appendChild(sound);
+
+    if (detail.preview) {
+      var replay = document.createElement("button");
+      replay.type = "button";
+      replay.className = "fallen-star-catch__replay";
+      replay.textContent = "重播星光";
+      replay.addEventListener("click", function () {
+        root.remove();
+        window.setTimeout(function () { showFallenStar({ preview: true, first: true }); }, 80);
+      });
+      controls.appendChild(replay);
+    }
+
+    var take = document.createElement("button");
+    take.type = "button";
+    take.className = "fallen-star-catch__take";
+    take.textContent = detail.preview ? "收起预览" : "收进图鉴";
+    take.addEventListener("click", closeFallenStar);
+    controls.appendChild(take);
+
+    card.appendChild(controls);
+    root.appendChild(veil);
+    root.appendChild(sky);
+    root.appendChild(beam);
+    root.appendChild(wake);
+    root.appendChild(relic);
+    root.appendChild(card);
+    document.body.appendChild(root);
+    playFallenStarSound();
+    take.focus({ preventScroll: true });
+
+    root.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") closeFallenStar();
+    });
+    if (!detail.preview) {
+      fallenStarTimer = window.setTimeout(closeFallenStar, 9200);
+    }
+  }
+
+  function isFallenStarCatch(data) {
+    var result = data && data.result;
+    return Boolean(data && data.ok && result && result.kind === "fish" &&
+      (result.fish_id === "fallen_star" || result.fish === "落星"));
+  }
+
+  function fallenStarPlaybackKey(data) {
+    var result = data.result || {};
+    return [result.fish_id || result.fish, result.text || "", result.first ? "1" : "0"].join("|");
+  }
+
+  window.addEventListener("rainholm:fallen-star", function (event) {
+    showFallenStar((event && event.detail) || {});
+  });
+
+  function isFallenStarPreview() {
+    try {
+      var url = new URL(window.location.href);
+      var local = url.hostname === "127.0.0.1" || url.hostname === "localhost";
+      return local && url.searchParams.get("preview") === "fallen-star";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function fallenStarPreviewFetchArgs(args) {
+    var input = args[0];
+    var url = typeof input === "string" ? input : input && input.url;
+    if (!url || !/\/api\/pond\/cast(?:\?|$)/.test(url) || !isFallenStarPreview()) {
+      return args;
+    }
+    if (typeof input === "string") {
+      var options = Object.assign({}, args[1] || {});
+      var headers = new Headers(options.headers || {});
+      headers.set("X-Rainholm-Preview", "fallen-star");
+      options.headers = headers;
+      args[1] = options;
+    } else if (input) {
+      var requestHeaders = new Headers(input.headers || {});
+      requestHeaders.set("X-Rainholm-Preview", "fallen-star");
+      args[0] = new Request(input, { headers: requestHeaders });
+    }
+    return args;
+  }
+
+  window.fetch = async function () {
+    var fetchArgs = fallenStarPreviewFetchArgs(Array.prototype.slice.call(arguments));
+    var response = await originalFetch.apply(null, fetchArgs);
+    try {
+      var input = fetchArgs[0];
       var url = typeof input === "string" ? input : input && input.url;
       if (url && /\/api\/pond\/cast(?:\?|$)/.test(url)) {
         response.clone().json().then(function (data) {
           if (data && data.ok && data.newly_unlocked && data.newly_unlocked.length) {
             showUnlock(data.newly_unlocked);
+          }
+          if (isFallenStarCatch(data)) {
+            var playbackKey = fallenStarPlaybackKey(data);
+            if (!fallenStarPlaybackKeys.has(playbackKey)) {
+              fallenStarPlaybackKeys.add(playbackKey);
+              showFallenStar({ first: data.result.first });
+            }
           }
         }).catch(function () {});
       }
@@ -382,6 +674,7 @@
 
   var pondRippleFrame = 0;
   var pondRippleDisabledSpots = /\/assets\/spot_(?:abyssal_trench|geyser_falls|sunken_ruins)\.jpg(?:\?|$)/;
+  var starryDeltaSpot = /\/assets\/spot_starry_delta\.jpg(?:\?|$)/;
 
   function pondMapImage() {
     var candidates = Array.prototype.slice.call(document.images).filter(function (image) {
@@ -406,6 +699,7 @@
     if (!mapLayer) return;
     var oldRipples = mapLayer.querySelector(".rainholm-pond-ripples");
     var mapSource = mapImage.currentSrc || mapImage.src || "";
+    ensureStarryDeltaMeteors(mapLayer, mapImage, mapSource);
     if (pondRippleDisabledSpots.test(mapSource)) {
       if (oldRipples) oldRipples.remove();
       return;
@@ -437,6 +731,39 @@
     mapImage.insertAdjacentElement("afterend", ripples);
   }
 
+  function ensureStarryDeltaMeteors(mapLayer, mapImage, mapSource) {
+    var isStarryDelta = starryDeltaSpot.test(mapSource);
+    var oldShower = mapLayer.querySelector(".rainholm-meteor-shower");
+    mapLayer.classList.toggle("rainholm-starry-delta", isStarryDelta);
+    if (!isStarryDelta) {
+      if (oldShower) oldShower.remove();
+      return;
+    }
+    if (oldShower) return;
+
+    var shower = document.createElement("div");
+    shower.className = "rainholm-meteor-shower";
+    shower.setAttribute("aria-hidden", "true");
+    [
+      ["76%", "3%", "8.6s", "-1.4s", ".72", "43vw", "10vh"],
+      ["101%", "9%", "10.4s", "-6.8s", "1", "55vw", "12vh"],
+      ["63%", "1%", "11.8s", "-9.5s", ".58", "36vw", "8vh"],
+      ["90%", "13%", "9.7s", "-4.1s", ".82", "48vw", "10vh"]
+    ].forEach(function (settings) {
+      var meteor = document.createElement("span");
+      meteor.className = "rainholm-meteor";
+      meteor.style.setProperty("--meteor-x", settings[0]);
+      meteor.style.setProperty("--meteor-y", settings[1]);
+      meteor.style.setProperty("--meteor-duration", settings[2]);
+      meteor.style.setProperty("--meteor-delay", settings[3]);
+      meteor.style.setProperty("--meteor-scale", settings[4]);
+      meteor.style.setProperty("--meteor-travel-x", settings[5]);
+      meteor.style.setProperty("--meteor-travel-y", settings[6]);
+      shower.appendChild(meteor);
+    });
+    mapImage.insertAdjacentElement("afterend", shower);
+  }
+
   function schedulePondRipples() {
     if (pondRippleFrame) return;
     pondRippleFrame = window.requestAnimationFrame(ensurePondRipples);
@@ -454,6 +781,19 @@
     childList: true,
     subtree: true
   });
+
+  function installFallenStarPreview() {
+    if (!isFallenStarPreview()) return;
+    window.setTimeout(function () {
+      showRiverGodToast("落星已入水……测试期间每一竿都会真正写入图鉴。");
+    }, 700);
+  }
+
+  if (document.readyState === "complete") {
+    installFallenStarPreview();
+  } else {
+    window.addEventListener("load", installFallenStarPreview, { once: true });
+  }
 
   document.addEventListener("click", function (event) {
     var button = event.target && event.target.closest && event.target.closest("button");

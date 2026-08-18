@@ -124,7 +124,7 @@ class RiverGodReliefTests(unittest.TestCase):
         self.assertEqual(quiz["question_ids"], original_ids)
         self.assertEqual(quiz["answers"][-1], {"question_id": 2, "choice": "B"})
 
-    def test_relief_requires_zero_points_but_does_not_depend_on_bait(self):
+    def test_relief_uses_cheapest_bait_cost_and_does_not_depend_on_inventory(self):
         self._join_and_empty(points=10, bait=0)
         blocked = self._start()
         self.assertEqual(blocked.status_code, 400)
@@ -134,9 +134,44 @@ class RiverGodReliefTests(unittest.TestCase):
         )
         with server._LOCK:
             state = server.POND["players"]["user"]["engine"]
-            state["points"] = 0
+            state["points"] = server.RELIEF_BAIT_FLOOR - 1
             state["bait_inventory"][next(iter(state["bait_inventory"]))] = 1
         self.assertEqual(self._start(txn="with-bait").status_code, 200)
+
+    def test_five_jade_can_open_relief_from_shop_plus(self):
+        self._join_and_empty(points=5, bait=2)
+        shop = self.client.get("/api/pond/shop", headers=self._headers())
+        self.assertEqual(shop.status_code, 200)
+        relief = shop.get_json()["river_god_relief"]
+        self.assertTrue(relief["available"])
+        self.assertFalse(relief["active"])
+        self.assertIsNone(relief["reason"])
+        self.assertEqual(self._start(txn="five-jade").status_code, 200)
+
+    def test_local_fallen_star_preview_writes_real_dex_and_description(self):
+        self._join_and_empty(points=5, bait=2)
+        with server._LOCK:
+            state = server.POND["players"]["user"]["engine"]
+            state["location_id"] = "starry_delta"
+            state["season_id"] = "spring"
+            state["unlocked_locations"] = list(server.engine.LOCATIONS)
+        headers = dict(self._headers())
+        headers["X-Rainholm-Preview"] = "fallen-star"
+        response = self.client.post(
+            "/api/pond/cast",
+            headers=headers,
+            json={"spot": "starry_delta", "bait": "basic_worm", "hook_quality": "good"},
+        )
+        self.assertEqual(response.status_code, 200)
+        result = response.get_json()["result"]
+        self.assertEqual(result["fish_id"], "fallen_star")
+        self.assertEqual(result["fish"], "落星")
+        self.assertIn(server.engine.FISH["fallen_star"]["description"], result["text"])
+        self.assertIn(server.engine.FISH["fallen_star"]["capture_feel"], result["text"])
+        with server._LOCK:
+            state = server.POND["players"]["user"]["engine"]
+            self.assertIn("fallen_star", state["encyclopedia"])
+            self.assertEqual(state["catch_inventory"][-1]["fish_id"], "fallen_star")
 
     def test_user_and_ai_follow_the_same_rules(self):
         for actor in ("user", "ai"):

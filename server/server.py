@@ -1032,23 +1032,51 @@ def _miss_cast(s):
             "consumed": True, "kind": "escape", "season_changed": season_msg != ""}
 
 
-def _do_cast(s, bait_id, hook_quality):
+def _do_cast(s, bait_id, hook_quality, forced_fish_id=None):
     if hook_quality == "miss":
         return _miss_cast(s)
     rng = engine._Rng(s["rngState"], s["rngCalls"])
-    if hook_quality == "perfect":
+
+    def cast_step():
+        if hook_quality != "perfect":
+            return engine._cast_step(rng, bait_id)
         # 完美起竿的「运气小加成」：本竿幸运事件概率翻倍（引擎默认 0.05）。
-        # 只临时改模块常量，不动引擎代码、不动任何数值表。
-        old = engine.LUCK_CHANCE
-        engine.LUCK_CHANCE = min(0.25, old * 2)
+        # 只临时改模块常量，不动任何数值表。
+        old_luck = engine.LUCK_CHANCE
+        engine.LUCK_CHANCE = min(0.25, old_luck * 2)
         try:
-            r = engine._cast_step(rng, bait_id)
+            result = engine._cast_step(rng, bait_id)
         finally:
-            engine.LUCK_CHANCE = old
-        if r.get("consumed"):
-            r["text"] = "✨ 完美起竿！\n" + r["text"]
+            engine.LUCK_CHANCE = old_luck
+        if result.get("consumed"):
+            result["text"] = "✨ 完美起竿！\n" + result["text"]
+        return result
+
+    if forced_fish_id:
+        forced_fish = engine.FISH.get(forced_fish_id)
+        if forced_fish is None:
+            raise ValueError("unknown forced fish: %s" % forced_fish_id)
+        location = engine.LOCATIONS[s["location_id"]]
+        old_eligible = engine._eligible
+        old_event_chance = location.get("event_chance_base")
+        old_junk_chance = location["junk_chance_base"]
+        location["event_chance_base"] = 0
+        location["junk_chance_base"] = 0
+        engine._eligible = lambda fish, loc_id, season_id: (
+            fish.get("id") == forced_fish_id
+            and old_eligible(fish, loc_id, season_id)
+        )
+        try:
+            r = cast_step()
+        finally:
+            engine._eligible = old_eligible
+            location["junk_chance_base"] = old_junk_chance
+            if old_event_chance is None:
+                location.pop("event_chance_base", None)
+            else:
+                location["event_chance_base"] = old_event_chance
     else:
-        r = engine._cast_step(rng, bait_id)
+        r = cast_step()
     s["rngState"] = rng.state
     s["rngCalls"] = rng.calls
     return r
@@ -1199,7 +1227,11 @@ def api_cast():
                 return jsonify({"ok": False, "error": "spot_locked",
                                 "text": goto_text, "spot_locked_reason": goto_text}), 400
         bag_len_before = len(s["catch_inventory"])
-        r = _do_cast(s, bait, hook_quality)
+        preview_fish_id = None
+        if (request.remote_addr in ("127.0.0.1", "::1")
+                and request.headers.get("X-Rainholm-Preview") == "fallen-star"):
+            preview_fish_id = "fallen_star"
+        r = _do_cast(s, bait, hook_quality, forced_fish_id=preview_fish_id)
         # 达标的这一竿结算后就立即展开地图，不用等下次 /state 轮询。
         newly_unlocked_ids = _apply_proficiency_unlocks(s)
         _touch(p)
@@ -1237,7 +1269,8 @@ def api_cast():
                   # 纯演出用等待时长，不影响掷骰结果：钓点基准区间 × 稀有度系数
                   "wait_seconds": _calc_wait_seconds(s["location_id"], r.get("rarity") if r.get("kind") == "fish" else None)}
         if r.get("kind") == "fish":
-            result.update({"fish": r.get("fish_name"), "rarity": r.get("rarity"),
+            result.update({"fish_id": r.get("fish_id"),
+                           "fish": r.get("fish_name"), "rarity": r.get("rarity"),
                            "first": bool(r.get("first"))})
         ok = bool(r.get("consumed"))
         newly_unlocked = [
@@ -1383,9 +1416,12 @@ def api_leaderboard():
 
 
 # ── 经济死局救济：克霖河神五题答卷 ────────────────────
+RELIEF_BAIT_FLOOR = min(bait["cost"] for bait in engine.BAITS.values())
+
+
 def _relief_need_reason(s):
-    """仙玉归零才可领取救济；鱼饵购买走鱼饵自己的加号入口。"""
-    if s.get("points", 0) > 0:
+    """余额买不起最便宜鱼饵时可领取救济；是否仍有存饵不影响资格。"""
+    if s.get("points", 0) >= RELIEF_BAIT_FLOOR:
         return "年轻人……钓鱼呢是陶冶情操修身养性的活动，别这么贪心急躁嘛~！"
     return None
 
@@ -2021,7 +2057,7 @@ def _ai_public_base():
 _AI_RULES = [
     "先 join 入座才能 cast/chat；纯看塘（brief/poll）不用 join，也不会把你算进在场。",
     "新玩家 join 起始 1000 灵玉，默认只开「月光池 moonlit_pond」，累计钓获或图鉴会自动解锁全部 11 张地图。",
-    "钓鱼要鱼饵：渔获 sell 换仙玉，shop 买饵。仙玉归零时可 relief 找河神；逐题传 A/B/C，答满 5 题后随机发 100-8888 仙玉，每日一次。",
+    "钓鱼要鱼饵：渔获 sell 换仙玉，shop 买饵。余额低于最便宜鱼饵时可 relief 找河神；逐题传 A/B/C，答满 5 题后随机发 100-8888 仙玉，每日一次。",
     "chat 就是全塘频道，说的话所有在场的人都看得到；聊天最多 500 字。",
     "钓到鱼不分品级全塘广播；只有跑鱼（脱钩）本人可见——丢脸的事塘替你兜着。",
 ]
@@ -2056,7 +2092,7 @@ def _ai_actions(key_ph):
          "curl": "curl -s '%s/state' -H 'X-Pond-Key: %s'" % (b, key_ph)},
         {"action": "shop", "desc": "看鱼饵铺子",
          "curl": "curl -s '%s/shop' -H 'X-Pond-Key: %s'" % (b, key_ph)},
-        {"action": "relief", "desc": "仙玉归零时开始河神五题救济；首次空 body 开始，后续传 choice=A/B/C 逐题回答",
+        {"action": "relief", "desc": "余额低于最便宜鱼饵时开始河神五题救济；首次空 body 开始，后续传 choice=A/B/C 逐题回答",
          "curl": "curl -s -X POST '%s/relief' -H 'X-Pond-Key: %s' -H 'Content-Type: application/json' -d '{}'" % (b, key_ph)},
         {"action": "sell", "desc": "卖渔获换灵玉；target 可为 all / species <鱼id> / 实例id",
          "curl": "curl -s -X POST '%s/sell' -H 'X-Pond-Key: %s' "
