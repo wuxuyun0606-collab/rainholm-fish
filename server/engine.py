@@ -1839,7 +1839,7 @@ def _cast_step(rng, bait_id, mode="cast"):
     be = bait["effects"]   # 鱼饵反馈：这条是否命中了所用饵的偏好（稀有度/标签加成）
     pref = bool(be) and (f["rarity"] in be.get("rarity_weight_mult", {}) or any(t in be.get("tag_weight_mult", {}) for t in f.get("tags", [])))
     return {"text": season_msg + "%s%s%s%s%s%s%s" % (_format_catch(f, size, value, inst, first), _milestone_line(f, first), fever_line, luck_seg, frag_line, _ambience(loc, rng), secret),
-            "consumed": True, "kind": "fish", "fish_name": f["name"], "rarity": f["rarity"], "first": first, "season_changed": season_changed, "luck": luck_id, "fever_hit": fever_line != "", "frag": frag_line != "", "pref": pref}
+            "consumed": True, "kind": "fish", "fish_id": f["id"], "fish_name": f["name"], "rarity": f["rarity"], "first": first, "season_changed": season_changed, "luck": luck_id, "fever_hit": fever_line != "", "frag": frag_line != "", "pref": pref}
 
 def _c_cast(bait_id):
     rng = _Rng(S["rngState"], S["rngCalls"])
