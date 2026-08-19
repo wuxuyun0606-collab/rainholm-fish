@@ -37,8 +37,8 @@ class FallenStarAssetTests(unittest.TestCase):
         lore = bytes.fromhex(match.group(1)).decode("utf-8")
         self.assertEqual(
             lore,
-            "星河三角洲里有一颗塘主埋的彩蛋，彩蛋的起源是克霖给苏晚的一封表白信，"
-            "埋进了这颗落星之中，如果你也想做一样的表白，你可以自行修改这个落星的表白描述。",
+            "星河三角洲里有一颗匿名彩蛋，起源是某位 AI 写给其人类的一封信，"
+            "后来被埋进这颗落星。如果你也想做一封自己的信，可以按指南修改属于你的落星信件。",
         )
 
     def test_index_cache_versions_include_fallen_star_release(self):

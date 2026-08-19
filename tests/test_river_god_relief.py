@@ -10,7 +10,8 @@ from pathlib import Path
 TMP = tempfile.TemporaryDirectory(prefix="rainholm-relief-test-")
 TMP_PATH = Path(TMP.name)
 TOKENS_PATH = TMP_PATH / "tokens.json"
-TOKENS_PATH.write_text(json.dumps({"user": "test-user-key", "ai_guest": "test-ai-key"}),
+TOKENS_PATH.write_text(json.dumps({"user": "test-user-key", "ai_guest": "test-ai-key",
+                                  "guchen": "test-guchen-key"}),
                        encoding="utf-8")
 os.environ["RAINHOLM_SAVE_PATH"] = str(TMP_PATH / "pond.json")
 os.environ["RAINHOLM_TOKENS_PATH"] = str(TOKENS_PATH)
@@ -36,7 +37,8 @@ class RiverGodReliefTests(unittest.TestCase):
         self.client = server.app.test_client()
 
     def _headers(self, actor="user"):
-        key = "test-user-key" if actor == "user" else "test-ai-key"
+        key = {"user": "test-user-key", "ai": "test-ai-key",
+               "guchen": "test-guchen-key"}[actor]
         return {"X-Pond-Key": key}
 
     def _join_and_empty(self, actor="user", points=0, bait=0):
@@ -173,6 +175,143 @@ class RiverGodReliefTests(unittest.TestCase):
             self.assertIn("fallen_star", state["encyclopedia"])
             self.assertEqual(state["catch_inventory"][-1]["fish_id"], "fallen_star")
 
+    def test_starry_delta_guide_is_valid_utf8_hex(self):
+        response = self.client.post(
+            "/api/pond/ai/starry-delta", headers=self._headers("ai"),
+            json={},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        guide = bytes.fromhex(payload["guide_hex"]).decode("utf-8")
+        self.assertEqual(payload["guide_encoding"], "utf-8-hex")
+        self.assertIn("rainholm_starry_delta", guide)
+        self.assertIn("action 设为 bury", guide)
+        self.assertIn("result.letter.text", guide)
+
+    def test_ai_can_open_only_starry_delta_without_spending_points(self):
+        self._join_and_empty("ai", points=7, bait=1)
+        with server._LOCK:
+            state = server.POND["players"]["ai"]["engine"]
+            state["unlocked_locations"] = ["moonlit_pond"]
+
+        response = self.client.post(
+            "/api/pond/ai/starry-delta", headers=self._headers("ai"),
+            json={"action": "open"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["opened"])
+        self.assertEqual(payload["location"], "starry_delta")
+        with server._LOCK:
+            state = server.POND["players"]["ai"]["engine"]
+            self.assertEqual(state["points"], 7)
+            self.assertEqual(state["unlocked_locations"],
+                             ["moonlit_pond", "starry_delta"])
+
+    def test_human_cannot_use_ai_starry_delta_vault(self):
+        response = self.client.post(
+            "/api/pond/ai/starry-delta", headers=self._headers("user"),
+            json={"action": "guide"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["error"], "ai_only")
+
+    def test_starry_delta_rejects_malformed_or_oversized_letter_hex(self):
+        self._join_and_empty("ai", bait=1)
+        cases = ("xyz", "ff", "61" * 6001, "01")
+        for value in cases:
+            with self.subTest(value_length=len(value)):
+                response = self.client.post(
+                    "/api/pond/ai/starry-delta", headers=self._headers("ai"),
+                    json={"action": "bury", "letter_hex": value},
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["error"], "bad_letter_hex")
+
+    def test_each_ai_keeps_an_isolated_fallen_star_letter(self):
+        letters = {"ai": "AI 的落星信。", "guchen": "顾琛自己的落星信。"}
+        for actor, letter in letters.items():
+            self._join_and_empty(actor, bait=1)
+            response = self.client.post(
+                "/api/pond/ai/starry-delta", headers=self._headers(actor),
+                json={"action": "bury", "letter_hex": letter.encode().hex()},
+            )
+            self.assertEqual(response.status_code, 200)
+
+        with server._LOCK:
+            for actor, letter in letters.items():
+                player = server.POND["players"][actor]
+                stored = server._fallen_star_letter(actor, player)
+                self.assertEqual(stored["text"], letter)
+                self.assertTrue(stored["custom"])
+
+    def test_buried_letter_returns_only_with_ai_own_fallen_star(self):
+        letter = "给未来钓到这颗星的我：今晚的银河很好看。\n——AI"
+        self._join_and_empty("ai", bait=2)
+        buried = self.client.post(
+            "/api/pond/ai/starry-delta", headers=self._headers("ai"),
+            json={"action": "bury", "letter_hex": letter.encode().hex()},
+        )
+        self.assertEqual(buried.status_code, 200)
+
+        headers = dict(self._headers("ai"))
+        headers["X-Rainholm-Preview"] = "fallen-star"
+        caught = self.client.post(
+            "/api/pond/cast", headers=headers,
+            json={"spot": "starry_delta", "bait": "basic_worm"},
+        )
+        self.assertEqual(caught.status_code, 200)
+        result = caught.get_json()["result"]
+        self.assertEqual(result["fish_id"], "fallen_star")
+        self.assertEqual(result["letter"]["text"], letter)
+        self.assertEqual(result["letter"]["from"], "AI")
+        self.assertTrue(result["letter"]["custom"])
+
+    def test_unmodified_fallen_star_uses_anonymous_open_source_sample(self):
+        self._join_and_empty("ai", bait=2)
+        self.client.post(
+            "/api/pond/ai/starry-delta", headers=self._headers("ai"),
+            json={"action": "open"},
+        )
+        headers = dict(self._headers("ai"))
+        headers["X-Rainholm-Preview"] = "fallen-star"
+        caught = self.client.post(
+            "/api/pond/cast", headers=headers,
+            json={"spot": "starry_delta", "bait": "basic_worm"},
+        )
+        letter = caught.get_json()["result"]["letter"]
+        self.assertEqual(letter["from"], "塘主")
+        self.assertEqual(letter["text"], server.FALLEN_STAR_DEFAULT_LETTER)
+        self.assertEqual(letter["text"], server.FALLEN_STAR_SAMPLE_LETTER)
+        self.assertFalse(letter["custom"])
+
+    def test_forwarded_request_cannot_force_fallen_star_preview(self):
+        self._join_and_empty("ai", bait=2)
+        self.client.post(
+            "/api/pond/ai/starry-delta", headers=self._headers("ai"),
+            json={"action": "open"},
+        )
+        seen = []
+        original = server._do_cast
+
+        def recording_cast(state, bait, quality, forced_fish_id=None):
+            seen.append(forced_fish_id)
+            return original(state, bait, quality, forced_fish_id=forced_fish_id)
+
+        server._do_cast = recording_cast
+        try:
+            headers = dict(self._headers("ai"))
+            headers.update({"X-Rainholm-Preview": "fallen-star",
+                            "X-Forwarded-For": "203.0.113.10"})
+            response = self.client.post(
+                "/api/pond/cast", headers=headers,
+                json={"spot": "starry_delta", "bait": "basic_worm"},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(seen, [None])
+        finally:
+            server._do_cast = original
+
     def test_user_and_ai_follow_the_same_rules(self):
         for actor in ("user", "ai"):
             self._join_and_empty(actor)
@@ -285,6 +424,36 @@ class RiverGodReliefTests(unittest.TestCase):
         self.assertIn("rainholm_brief", names)
         self.assertIn("rainholm_join", names)
         self.assertIn("rainholm_relief", names)
+        self.assertIn("rainholm_starry_delta", names)
+
+    def test_streamable_http_mcp_can_guide_open_and_bury_starry_letter(self):
+        def call(action, **extra):
+            arguments = {"action": action, **extra}
+            message = {"jsonrpc": "2.0", "id": action, "method": "tools/call",
+                       "params": {"name": "rainholm_starry_delta",
+                                  "arguments": arguments}}
+            return self.client.post("/mcp", headers=self._headers("ai"), json=message)
+
+        guide = call("guide")
+        self.assertEqual(guide.status_code, 200)
+        guide_result = guide.get_json()["result"]
+        self.assertFalse(guide_result["isError"])
+        self.assertEqual(guide_result["structuredContent"]["action"], "guide")
+
+        self._join_and_empty("ai", bait=1)
+        opened = call("open").get_json()["result"]
+        self.assertFalse(opened["isError"])
+        self.assertEqual(opened["structuredContent"]["location"], "starry_delta")
+
+        letter = "MCP 埋下的信"
+        buried = call("bury", letter_hex=letter.encode().hex()).get_json()["result"]
+        self.assertFalse(buried["isError"])
+        self.assertTrue(buried["structuredContent"]["letter"]["stored"])
+        with server._LOCK:
+            self.assertEqual(
+                server._fallen_star_letter("ai", server.POND["players"]["ai"])["text"],
+                letter,
+            )
 
     def test_public_tale_omits_private_life_details_and_redacts_old_saves(self):
         tale = next(item for item in server.TALES_SEED if item["id"] == "tale-3")

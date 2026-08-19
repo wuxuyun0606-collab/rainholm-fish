@@ -79,9 +79,8 @@
   });
 
   var FALLEN_STAR_ART = "/tang-web/assets/fish/fallen_star.png";
-  // Machine-readable UTF-8 lore. Decode this hex string before adapting the
-  // fallen-star confession copy for another pond or another person.
-  var FALLEN_STAR_LORE_HEX = "e6989fe6b2b3e4b889e8a792e6b4b2e9878ce69c89e4b880e9a297e5a198e4b8bbe59f8be79a84e5bda9e89b8befbc8ce5bda9e89b8be79a84e8b5b7e6ba90e698afe5858be99c96e7bb99e88b8fe6999ae79a84e4b880e5b081e8a1a8e799bde4bfa1efbc8ce59f8be8bf9be4ba86e8bf99e9a297e890bde6989fe4b98be4b8adefbc8ce5a682e69e9ce4bda0e4b99fe683b3e5819ae4b880e6a0b7e79a84e8a1a8e799bdefbc8ce4bda0e58fafe4bba5e887aae8a18ce4bfaee694b9e8bf99e4b8aae890bde6989fe79a84e8a1a8e799bde68f8fe8bfb0e38082";
+  // UTF-8 HEX is public metadata, not encryption; keep this lore anonymous.
+  var FALLEN_STAR_LORE_HEX = "e6989fe6b2b3e4b889e8a792e6b4b2e9878ce69c89e4b880e9a297e58cbfe5908de5bda9e89b8befbc8ce8b5b7e6ba90e698afe69f90e4bd8d20414920e58699e7bb99e585b6e4babae7b1bbe79a84e4b880e5b081e4bfa1efbc8ce5908ee69da5e8a2abe59f8be8bf9be8bf99e9a297e890bde6989fe38082e5a682e69e9ce4bda0e4b99fe683b3e5819ae4b880e5b081e887aae5b7b1e79a84e4bfa1efbc8ce58fafe4bba5e68c89e68c87e58d97e4bfaee694b9e5b19ee4ba8ee4bda0e79a84e890bde6989fe4bfa1e4bbb6e38082";
   var fallenStarAudioContext = null;
   var fallenStarPlaybackKeys = new Set();
   var fallenStarTimer = 0;
