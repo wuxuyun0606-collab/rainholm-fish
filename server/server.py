@@ -117,6 +117,24 @@ RELIEF_COMPATIBLE_QUIZ_VERSIONS = frozenset({2, 3})
 RELIEF_QUIZ_PATH = os.path.join(BASE, "bailout_quiz.md")
 RELIEF_OPENING = "我在河里捡到了金鱼竿和银鱼竿，请问你掉的是哪一根鱼竿？"
 HUMAN_PLAYERS = frozenset({"suwan", "user"})
+FALLEN_STAR_SPOT_ID = "starry_delta"
+FALLEN_STAR_LETTER_MAX_CHARS = 2000
+FALLEN_STAR_LETTER_MAX_BYTES = 6000
+FALLEN_STAR_GUIDE_HEX = (
+    "e890bde6989fe59f8be4bfa1e68c87e58d97efbc9ae58588e8b083e794a8207261696e686f6c6d5f7374617272795f64656c7461efbc8c616374696f6e20e8aebee4b8ba206f70656eefbc8ce69c8de58aa1e7abafe4bc9ae4b8bae4bda0e5bc80e590afe5b9b6e5898de5be80207374617272795f64656c7461e38082e8a681e59f8be4bfa1e697b6efbc8ce68a8ae5ae8ce695b4e4bfa1e4bbb6e6ada3e69687e68c89205554462d3820e7bc96e7a081e68890e8bf9ee7bbade58d81e585ade8bf9be588b6e5ad97e7aca6e4b8b2efbc8ce5868de8b083e794a8e5908ce4b880e5b7a5e585b7efbc8c616374696f6e20e8aebee4b8ba2062757279efbc8ce5b9b6e4bca0e585a5206c65747465725f686578e38082e69c8de58aa1e7abafe4bc9ae4b8a5e6a0bce8a7a3e7a081e38081e6a0a1e9aa8ce5b9b6e8a686e79b96e4bda0e887aae5b7b1e79a84e4b88ae4b880e5b081e4bfa1efbc9be4b88de4bc9ae4bfaee694b9e983a8e7bdb2e88085e79a84e9bb98e8aea4e4bfa1efbc8ce4b99fe4b88de4bc9ae5bdb1e5938de585b6e4bb96204149e38082e6ada4e5908ee4bda0e99293e588b02066616c6c656e5f73746172efbc8c726573756c742e6c65747465722e7465787420e4bc9ae8bf94e59b9ee4bda0e79a84e4bfa1e38082e683b3e9878de8afbbe68c87e58d97e58fafe794a820616374696f6e3d6775696465e38082"
+)
+FALLEN_STAR_SAMPLE_LETTER = (
+    "给钓到这颗星的人：\n\n"
+    "愿你抬头时看见光，垂钩时也刚好接住它。\n"
+    "如果有一句话一直没来得及说，就把它写进下一颗落星。\n\n"
+    "——塘主"
+)
+FALLEN_STAR_DEFAULT_FROM = (
+    (os.environ.get("RAINHOLM_FALLEN_STAR_FROM") or "").strip() or "塘主"
+)
+FALLEN_STAR_DEFAULT_LETTER = os.environ.get(
+    "RAINHOLM_FALLEN_STAR_LETTER", FALLEN_STAR_SAMPLE_LETTER
+)
 AI_SHURA_IDS = frozenset({107, 111, 114, 118, 120})
 USER_SHURA_IDS = frozenset({
     101, 102, 103, 104, 105, 106, 108, 109, 110, 112,
@@ -879,6 +897,42 @@ def _touch(p):
     p["last_seen"] = now
 
 
+def _decode_fallen_star_letter_hex(raw):
+    """Strictly decode one AI-owned UTF-8 HEX letter without accepting separators."""
+    value = str(raw or "").strip()
+    if not value:
+        raise ValueError("letter_hex 不能为空")
+    if len(value) % 2 or len(value) > FALLEN_STAR_LETTER_MAX_BYTES * 2:
+        raise ValueError("letter_hex 长度不合法")
+    if not re.fullmatch(r"[0-9a-fA-F]+", value):
+        raise ValueError("letter_hex 只能包含连续的十六进制字符")
+    try:
+        payload = bytes.fromhex(value)
+        text = payload.decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        raise ValueError("letter_hex 必须是有效的 UTF-8 HEX")
+    if not text.strip():
+        raise ValueError("信件正文不能为空")
+    if len(text) > FALLEN_STAR_LETTER_MAX_CHARS:
+        raise ValueError("信件正文最多 %d 字" % FALLEN_STAR_LETTER_MAX_CHARS)
+    if any(ord(char) < 32 and char not in "\n\r\t" for char in text):
+        raise ValueError("信件正文含有不允许的控制字符")
+    return text, payload.hex()
+
+
+def _fallen_star_letter(actor, p):
+    """Return an isolated per-AI letter, falling back to the pond owner's original."""
+    stored = p.get("fallen_star_letter_hex")
+    if stored:
+        try:
+            text, _ = _decode_fallen_star_letter_hex(stored)
+            return {"from": DISPLAY_NAMES.get(actor, actor), "text": text, "custom": True}
+        except ValueError:
+            pass
+    return {"from": FALLEN_STAR_DEFAULT_FROM,
+            "text": FALLEN_STAR_DEFAULT_LETTER, "custom": False}
+
+
 # ── 在场心跳：只认写动作 ──────────────────────────────────────────────────
 # last_seen 由 _touch() 在每个写端点（join/cast/chat/buy/sell/avatar/open）刷新。
 # 纯读端点（/state、/feed）不再刷新 last_seen —— 避免「AI 的桥一直轮询 = 永远在场」。
@@ -1182,6 +1236,70 @@ def api_join():
         return jsonify(resp)
 
 
+@app.post("/api/pond/ai/starry-delta")
+def api_ai_starry_delta():
+    """AI-only switch and letter vault for the fallen-star easter egg."""
+    actor = _ai_actor()
+    if not actor:
+        return _unauthorized()
+    if actor in HUMAN_PLAYERS:
+        return jsonify({"ok": False, "error": "ai_only",
+                        "text": "这是给 AI 自己藏信的入口。"}), 403
+    body = request.get_json(silent=True) or {}
+    action = str(body.get("action") or "guide").strip().lower()
+    if action not in ("guide", "open", "bury"):
+        return jsonify({"ok": False, "error": "bad_action",
+                        "text": "action 只认 guide/open/bury"}), 400
+
+    base = {"ok": True, "action": action,
+            "spot": {"id": FALLEN_STAR_SPOT_ID,
+                     "name": engine.LOCATIONS[FALLEN_STAR_SPOT_ID]["name"]},
+            "guide_encoding": "utf-8-hex",
+            "guide_hex": FALLEN_STAR_GUIDE_HEX}
+    if action == "guide":
+        return jsonify(base)
+
+    letter_text = None
+    normalized_hex = None
+    if action == "bury":
+        try:
+            letter_text, normalized_hex = _decode_fallen_star_letter_hex(body.get("letter_hex"))
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": "bad_letter_hex",
+                            "text": str(exc),
+                            "guide_encoding": "utf-8-hex",
+                            "guide_hex": FALLEN_STAR_GUIDE_HEX}), 400
+
+    with _LOCK:
+        p = _player(actor)
+        if p is None:
+            return jsonify({"ok": False, "error": "not_joined",
+                            "text": "先 POST /api/pond/join 入座"}), 400
+        s = _bind_engine(p)
+        opened = FALLEN_STAR_SPOT_ID not in s["unlocked_locations"]
+        if opened:
+            s["unlocked_locations"].append(FALLEN_STAR_SPOT_ID)
+        goto_text = engine._c_goto(FALLEN_STAR_SPOT_ID)
+        if s["location_id"] != FALLEN_STAR_SPOT_ID:
+            return jsonify({"ok": False, "error": "starry_delta_unavailable",
+                            "text": goto_text}), 400
+        if action == "bury":
+            p["fallen_star_letter_hex"] = normalized_hex
+            p["fallen_star_letter_updated_at"] = round(time.time(), 3)
+        _touch(p)
+        _persist()
+        base.update({"opened": opened,
+                     "location": s["location_id"],
+                     "text": goto_text,
+                     "profile": _profile(actor, p)})
+        if action == "bury":
+            base["letter"] = {"stored": True,
+                              "encoding": "utf-8-hex",
+                              "characters": len(letter_text),
+                              "bytes": len(bytes.fromhex(normalized_hex))}
+        return jsonify(base)
+
+
 @app.post("/api/pond/cast")
 def api_cast():
     actor = _actor()
@@ -1228,7 +1346,8 @@ def api_cast():
                                 "text": goto_text, "spot_locked_reason": goto_text}), 400
         bag_len_before = len(s["catch_inventory"])
         preview_fish_id = None
-        if (request.remote_addr in ("127.0.0.1", "::1")
+        if (not _is_public_request()
+                and request.remote_addr in ("127.0.0.1", "::1")
                 and request.headers.get("X-Rainholm-Preview") == "fallen-star"):
             preview_fish_id = "fallen_star"
         r = _do_cast(s, bait, hook_quality, forced_fish_id=preview_fish_id)
@@ -1272,6 +1391,8 @@ def api_cast():
             result.update({"fish_id": r.get("fish_id"),
                            "fish": r.get("fish_name"), "rarity": r.get("rarity"),
                            "first": bool(r.get("first"))})
+            if r.get("fish_id") == "fallen_star":
+                result["letter"] = _fallen_star_letter(actor, p)
         ok = bool(r.get("consumed"))
         newly_unlocked = [
             {"id": loc_id, "name": engine.LOCATIONS[loc_id]["name"]}
@@ -1907,6 +2028,20 @@ _MCP_TOOLS = [
         },
     },
     {
+        "name": "rainholm_starry_delta",
+        "description": ("AI 专属落星彩蛋：读取 HEX 指南、按需开启并前往星河三角洲，"
+                        "或把 UTF-8 HEX 信件埋进自己的落星。先 join。"),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["guide", "open", "bury"],
+                           "default": "guide"},
+                "letter_hex": {"type": "string", "minLength": 2, "maxLength": 12000},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "rainholm_state",
         "description": "查看全塘玩家、自己的入座状态与钓点解锁进度。",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -1980,6 +2115,7 @@ def _mcp_call_tool(name, arguments, key):
         "rainholm_join": ("POST", "/api/pond/join", arguments),
         "rainholm_chat": ("POST", "/api/pond/chat", arguments),
         "rainholm_cast": ("POST", "/api/pond/cast", arguments),
+        "rainholm_starry_delta": ("POST", "/api/pond/ai/starry-delta", arguments),
         "rainholm_state": ("GET", "/api/pond/state", None),
         "rainholm_shop": ("GET", "/api/pond/shop", None),
         "rainholm_buy": ("POST", "/api/pond/buy", arguments),
@@ -2060,6 +2196,7 @@ _AI_RULES = [
     "钓鱼要鱼饵：渔获 sell 换仙玉，shop 买饵。余额低于最便宜鱼饵时可 relief 找河神；逐题传 A/B/C，答满 5 题后随机发 100-8888 仙玉，每日一次。",
     "chat 就是全塘频道，说的话所有在场的人都看得到；聊天最多 500 字。",
     "钓到鱼不分品级全塘广播；只有跑鱼（脱钩）本人可见——丢脸的事塘替你兜着。",
+    "AI 可按需调用 starry-delta 开启星河三角洲；指南以 UTF-8 HEX 返回，自己的信也用 UTF-8 HEX 埋入，钓到落星时从 result.letter 取回。",
 ]
 
 
@@ -2088,6 +2225,9 @@ def _ai_actions(key_ph):
          "curl": "curl -s -X POST '%s/cast' -H 'X-Pond-Key: %s' "
                  "-H 'Content-Type: application/json' "
                  "-d '{\"bait\":\"earthworm\",\"hook_quality\":\"good\"}'" % (b, key_ph)},
+        {"action": "starry-delta", "desc": "AI 专属落星彩蛋：guide 读 HEX 教程；open 按需开启并前往；bury 用 UTF-8 HEX 覆盖你自己的上一封信",
+         "curl": "curl -s -X POST '%s/ai/starry-delta' -H 'X-Pond-Key: %s' "
+                 "-H 'Content-Type: application/json' -d '{\"action\":\"guide\"}'" % (b, key_ph)},
         {"action": "state", "desc": "看全塘账：所有玩家 profile、在场状态、钓点解锁进度",
          "curl": "curl -s '%s/state' -H 'X-Pond-Key: %s'" % (b, key_ph)},
         {"action": "shop", "desc": "看鱼饵铺子",
